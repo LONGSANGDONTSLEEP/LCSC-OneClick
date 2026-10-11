@@ -89,7 +89,7 @@ Demo.5 的商城离线验证还覆盖单价精度、库存与缺失值、最低�
 
 启动后台检查另运行 `test_startup_update.py`，覆盖有新版弹窗、无更新/网络失败静默、只检查一次、手动查询接管和关闭时不等待网络。真实 EXE 使用 `local_update_test.py --auto --startup`，再分别追加 `--scenario no-update`、`--scenario check-failure` 验证静默分支。其他自测入口不自动请求 GitHub。
 
-版本信息在 `app/main.py` 的 `VERSION` 与 `app/version_info.txt` 的 Windows 版本资源中。同步使用说明与版本记录后，通过测试、构建和成品验证，再创建对应的 `vX.Y.Z` Git 标签和 GitHub Release。
+版本信息在 `app/main.py` 的 `VERSION` 与 `app/version_info.txt` 的 Windows 版本资源中；同步更新 `docs/images/release-badge.svg` 中的版本文字。同步使用说明与版本记录后，通过测试、构建和成品验证，再创建对应的 `vX.Y.Z` Git 标签和 GitHub Release。
 
 Release 上传固定文件名 `LCSC3D.exe`、`LCSC3D.zip` 和 `SHA256SUMS.txt`。EXE、ZIP 与验证输出不放入 Git。修改许可证、上游版本或打包依赖时同步更新第三方声明。
 
