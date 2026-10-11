@@ -60,6 +60,43 @@ Both targets support multi-unit symbols, string pin numbers and common surface-m
 
 Detailed operations are in the [user guide (Chinese)](app/README.md).
 
+## AD export examples
+
+These previously shared AD screenshots show exported symbols, footprints and library references in a PCB project. Expand the gallery for additional symbol, footprint and 3D examples.
+
+| Schematic library in AD | Footprint library in AD |
+| --- | --- |
+| <a href="docs/images/2.2.0/ad-symbol-user.png"><img src="docs/images/2.2.0/ad-symbol-user.png" alt="User-provided AD screenshot showing a SchLib symbol and pins" width="440"></a> | <a href="docs/images/2.2.0/ad-footprint-user.png"><img src="docs/images/2.2.0/ad-footprint-user.png" alt="User-provided AD screenshot showing a 20-pad PcbLib footprint" width="440"></a> |
+
+<a href="docs/images/2.2.0/ad-project-user.png"><img src="docs/images/2.2.0/ad-project-user.png" alt="User-provided AD PCB project with SchLib and PcbLib references" width="340"></a>
+
+<details>
+<summary>More AD examples: multi-unit symbols, BGA footprints and manually added STEP models</summary>
+
+The 3D views below show the result **after manually adding a STEP model in AD**. Exported PcbLib files do not include these 3D bodies automatically.
+
+| Multi-unit schematic symbol | BGA footprint |
+| --- | --- |
+| <a href="docs/images/screenshots/4.png"><img src="docs/images/screenshots/4.png" alt="Multi-unit schematic symbol in AD" width="440"></a> | <a href="docs/images/screenshots/5.png"><img src="docs/images/screenshots/5.png" alt="BGA footprint in AD" width="440"></a> |
+
+| Pads and copper regions | Custom pad geometry |
+| --- | --- |
+| <a href="docs/images/screenshots/6.png"><img src="docs/images/screenshots/6.png" alt="Pad and copper-region details in AD" width="440"></a> | <a href="docs/images/screenshots/7.png"><img src="docs/images/screenshots/7.png" alt="Custom pads and footprint copper regions in AD" width="440"></a> |
+
+| Connector footprint | 3D view after importing STEP |
+| --- | --- |
+| <a href="docs/images/screenshots/8.png"><img src="docs/images/screenshots/8.png" alt="2D connector footprint in AD" width="440"></a> | <a href="docs/images/screenshots/9.png"><img src="docs/images/screenshots/9.png" alt="AD 3D view after manually importing STEP" width="440"></a> |
+
+| Connector 3D view | Another connector view |
+| --- | --- |
+| <a href="docs/images/screenshots/10.png"><img src="docs/images/screenshots/10.png" alt="Connector with a manually added STEP model in AD" width="440"></a> | <a href="docs/images/screenshots/11.png"><img src="docs/images/screenshots/11.png" alt="Another view of the manually added connector STEP model in AD" width="440"></a> |
+
+| Type-C 3D view | Type-C underside |
+| --- | --- |
+| <a href="docs/images/screenshots/12.png"><img src="docs/images/screenshots/12.png" alt="Type-C connector after manually adding STEP in AD" width="440"></a> | <a href="docs/images/screenshots/13.png"><img src="docs/images/screenshots/13.png" alt="Underside of the manually added Type-C STEP model in AD" width="440"></a> |
+
+</details>
+
 ## Intermediate representation and exporters
 
 ```mermaid

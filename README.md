@@ -60,6 +60,43 @@ KiCad 添加封装库时，**库昵称应与导出库名一致**，例如 `LCSC3
 
 具体操作见 [使用说明](app/README.md)。
 
+## AD 导出效果
+
+以下保留此前的 AD 实测截图，展示符号库、封装库和 PCB 工程中的库引用。更多符号、封装及三维示例可展开查看。
+
+| AD 中的原理图库 | AD 中的 PCB 封装库 |
+| --- | --- |
+| <a href="docs/images/2.2.0/ad-symbol-user.png"><img src="docs/images/2.2.0/ad-symbol-user.png" alt="用户实测：AD 中打开 SchLib 并显示 MOS 管符号与引脚" width="440"></a> | <a href="docs/images/2.2.0/ad-footprint-user.png"><img src="docs/images/2.2.0/ad-footprint-user.png" alt="用户实测：AD 中打开 PcbLib 并显示 20 焊盘封装" width="440"></a> |
+
+<a href="docs/images/2.2.0/ad-project-user.png"><img src="docs/images/2.2.0/ad-project-user.png" alt="用户实测：PCB 工程中已包含 PcbLib 和 SchLib 库引用" width="340"></a>
+
+<details>
+<summary>更多既有 AD 实机示例：多单元符号、BGA、连接器和手动添加 STEP 后的三维效果</summary>
+
+以下三维截图展示在 AD 中**另外添加 STEP 模型后**的效果；软件导出的 PcbLib 本身不自动包含这些模型。
+
+| 多单元原理图符号 | BGA 封装 |
+| --- | --- |
+| <a href="docs/images/screenshots/4.png"><img src="docs/images/screenshots/4.png" alt="AD 中打开多单元原理图库" width="440"></a> | <a href="docs/images/screenshots/5.png"><img src="docs/images/screenshots/5.png" alt="AD 中打开 BGA PCB 封装库" width="440"></a> |
+
+| 焊盘与铜区细节 | 异形焊盘示例 |
+| --- | --- |
+| <a href="docs/images/screenshots/6.png"><img src="docs/images/screenshots/6.png" alt="AD 中查看焊盘与铜区细节" width="440"></a> | <a href="docs/images/screenshots/7.png"><img src="docs/images/screenshots/7.png" alt="AD 中查看异形焊盘和封装铜区" width="440"></a> |
+
+| 连接器二维封装 | 添加 STEP 后的 AD 三维视图 |
+| --- | --- |
+| <a href="docs/images/screenshots/8.png"><img src="docs/images/screenshots/8.png" alt="AD 中打开连接器封装" width="440"></a> | <a href="docs/images/screenshots/9.png"><img src="docs/images/screenshots/9.png" alt="AD 中添加 STEP 后的三维视图" width="440"></a> |
+
+| 连接器三维视图 | 连接器另一侧视图 |
+| --- | --- |
+| <a href="docs/images/screenshots/10.png"><img src="docs/images/screenshots/10.png" alt="AD 中添加 STEP 后的连接器三维视图" width="440"></a> | <a href="docs/images/screenshots/11.png"><img src="docs/images/screenshots/11.png" alt="AD 中添加 STEP 后的连接器另一侧视图" width="440"></a> |
+
+| Type-C 三维视图 | Type-C 底部视图 |
+| --- | --- |
+| <a href="docs/images/screenshots/12.png"><img src="docs/images/screenshots/12.png" alt="AD 中添加 STEP 后的 Type-C 连接器" width="440"></a> | <a href="docs/images/screenshots/13.png"><img src="docs/images/screenshots/13.png" alt="AD 中添加 STEP 后的 Type-C 连接器底部" width="440"></a> |
+
+</details>
+
 ## 中间层与导出器架构
 
 ```mermaid
