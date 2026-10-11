@@ -618,7 +618,9 @@ class MainWindow(FramelessMainWindow):
         self.symbol_unit_box.hide()
         preview_head.addWidget(self.symbol_unit_box)
         preview_layout.addLayout(preview_modes)
-        style_row = QHBoxLayout()
+        self.symbol_style_row = QWidget()
+        style_row = QHBoxLayout(self.symbol_style_row)
+        style_row.setContentsMargins(0, 0, 0, 0)
         style_row.addWidget(label(ui_text('符号风格'), 'muted'))
         self.symbol_style_box = QComboBox()
         self.symbol_style_box.setAccessibleName(ui_text('符号风格'))
@@ -630,7 +632,8 @@ class MainWindow(FramelessMainWindow):
         style_hint = label(ui_text('预览与 SchLib 导出'), 'muted')
         style_hint.setWordWrap(True)
         style_row.addWidget(style_hint, 1)
-        preview_layout.addLayout(style_row)
+        self.symbol_style_row.setVisible(self.preview_mode == 'symbol')
+        preview_layout.addWidget(self.symbol_style_row)
         self.preview_caption = label(ui_text('选择左侧列表中的器件'), 'muted')
         self.preview_caption.setWordWrap(True)
         preview_layout.addWidget(self.preview_caption)
@@ -1543,6 +1546,7 @@ class MainWindow(FramelessMainWindow):
 
     def set_preview_mode(self, mode):
         self.preview_mode = mode
+        self.symbol_style_row.setVisible(mode == 'symbol')
         self.preview_mode_buttons[mode].setChecked(True)
         self.fit_button.setVisible(True)
         self.preview_legend.setVisible(mode == 'footprint')

@@ -1,0 +1,28 @@
+{
+  "source": "User-provided AD.SchLib (2026-10-11)",
+  "sha256": "224b4cab1a49def024f322ddf7561515d1dfd3062f5ccc1bde0de3e1d6279c65",
+  "font": {
+    "FONTIDCOUNT": "1",
+    "FONTNAME1": "Times New Roman",
+    "SIZE1": "10"
+  },
+  "rectangle": {
+    "RECORD": "14",
+    "COLOR": "128",
+    "AREACOLOR": "11599871",
+    "ISSOLID": "T",
+    "TRANSPARENT": "T"
+  },
+  "pin": {
+    "electrical": 4,
+    "length": 30,
+    "color": 0,
+    "inner": 0,
+    "outer": 0
+  },
+  "text": {
+    "RECORD": "4",
+    "COLOR": "8388608",
+    "FONTID": "1"
+  }
+}

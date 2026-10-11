@@ -56,7 +56,7 @@ def verify(output, sandbox):
         print('PREVIEW', style, 'PASS', flush=True)
 
     sys.path.insert(0, str(root / 'app/tests'))
-    from altium_inspect import schematic
+    from altium_inspect import schematic, source_symbol_text_sizes, symbol_text_sizes
     for part in ('C163691', 'C2765186'):
         folder = run('regression-' + part, '--self-test-ad', 'ad', ('--self-test-ad-parts', part))
         report = json.loads((folder / 'verification.json').read_text('utf-8'))
@@ -64,12 +64,25 @@ def verify(output, sandbox):
         file = next(Path(f) for f in report['results'][0]['files'] if f.endswith('.SchLib'))
         header, records, pins = schematic(file.read_bytes())
         assert header['AREACOLOR'] == '16777215'
+        assert all(pin['electrical'] == 4 and pin['length'] >= 30 for pin in pins)
         assert not any(row.get('RECORD') == '10' for row in records)
         if part == 'C163691':
             assert len(pins) == 2 and not any('AREACOLOR' in row for row in records)
         else:
-            assert any(row.get('RECORD') == '14' for row in records)
+            rectangles = [row for row in records if row.get('RECORD') == '14']
+            assert rectangles
+            assert all((r['ISSOLID'], r['TRANSPARENT'], r['AREACOLOR'], r['LINEWIDTH']) ==
+                       ('T', 'T', '11599871', '0') for r in rectangles)
         print('REGRESSION', part, 'PASS', flush=True)
+
+    folder = run('passive-jlc', '--self-test-ad', 'jlc', ('--self-test-ad-parts', 'C2040'))
+    report = json.loads((folder / 'verification.json').read_text('utf-8'))
+    assert report['success'] and report['symbol_style'] == 'jlc'
+    file = next(Path(f) for f in report['results'][0]['files'] if f.endswith('.SchLib'))
+    _, _, pins = schematic(file.read_bytes())
+    assert len(pins) == 57 and all(pin['electrical'] == 4 for pin in pins)
+    assert any(pin['length'] < 30 for pin in pins)  # JLC retains original lengths.
+    print('PASSIVE_JLC PASS', flush=True)
 
     folder = sandbox / 'export-ad'
     fixtures = folder / 'fixtures'
@@ -92,23 +105,29 @@ def verify(output, sandbox):
                 if part == 'C2765186' or part == 'C23922' and case['name'].startswith('shared-append'):
                     continue  # Pre-existing entries retain their original appearance.
                 assert pins
+                assert all(pin['electrical'] == 4 and pin['length'] >= 30 for pin in pins)
                 for row in records:
                     assert row.get('RECORD') != '10'
                     for key in ('FONTID', 'NAME_CUSTOMFONTID', 'DESIGNATOR_CUSTOMFONTID'):
                         if key in row:
                             assert header['FONTNAME' + row[key]] == 'Times New Roman'
-                            assert header['SIZE' + row[key]] == '8'
                     if row.get('RECORD') == '2':
                         assert row['COLOR'] == '0'
                         assert row['NAME_CUSTOMCOLOR'] == row['DESIGNATOR_CUSTOMCOLOR'] == '8388608'
                     if row.get('RECORD') in ('6', '7', '8', '10', '14'):
-                        assert row['COLOR'] == '128' and row['LINEWIDTH'] == '1'
+                        assert row['COLOR'] == '128'
+                        assert row['LINEWIDTH'] == ('0' if row['RECORD'] == '14' else '1')
                         if 'AREACOLOR' in row:
                             assert row['AREACOLOR'] in ('128', '11599871')
+                        if row['RECORD'] == '14':
+                            assert (row['ISSOLID'], row['TRANSPARENT'], row['AREACOLOR']) == ('T', 'T', '11599871')
+                source_data = json.loads((fixtures / (part + '.json')).read_text('utf-8'))
+                assert symbol_text_sizes(header, records) == source_symbol_text_sizes(source_data), (case['name'], part)
                 checked += 1
     assert checked > 20
     assert source.read_bytes() == executable.read_bytes()
     result = dict(success=True, styles=reports, regression_parts=['C163691', 'C2765186'],
+                  passive_jlc=True, minimum_ad_pin_length_mil=300, source_font_sizes_preserved=True,
                   export_cases=17, independently_read_symbols=checked)
     (sandbox / 'verification.json').write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding='utf-8')
     return result

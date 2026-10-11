@@ -213,8 +213,10 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
             self.window.preview_mode_buttons['symbol'].click()
             self.wait_for_library()
             original = self.window.symbol_view.document
-            geometry = "Array.from(document.querySelectorAll('g[c_partid=part_pin]'), e => [e.id,e.getAttribute('c_origin'),e.getAttribute('c_spicepin'),e.getAttribute('c_elec')])"
+            geometry = "Array.from(document.querySelectorAll('g[c_partid=part_pin]'), e => [e.id,e.getAttribute('c_spicepin'),e.getAttribute('c_elec')])"
             pins = self.evaluate(self.window.symbol_view, geometry)
+            font_sizes = "Array.from(document.querySelectorAll('#canvas svg text,#canvas svg tspan'), e=>getComputedStyle(e).fontSize)"
+            original_sizes = self.evaluate(self.window.symbol_view, font_sizes)
             self.window.symbol_style_box.setCurrentIndex(1)
             self.wait_for_library()
             self.assertEqual(self.window.export_options().symbol_style, 'ad')
@@ -223,7 +225,7 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
             style = self.evaluate(self.window.symbol_view,
                 "(() => { const p=document.querySelector('g[c_partid=part_pin]'); const s=getComputedStyle(p.querySelector('text')); return [getComputedStyle(p.querySelector('path')).stroke,s.fill,s.fontFamily,parseFloat(s.fontSize)]; })()")
             self.assertEqual(style[:3], ['rgb(0, 0, 0)', 'rgb(0, 0, 128)', '"Times New Roman"'])
-            self.assertAlmostEqual(style[3], 8 / 0.72, places=3)
+            self.assertEqual(self.evaluate(self.window.symbol_view, font_sizes), original_sizes)
             from i18n import set_language
             try:
                 set_language('en_US')
@@ -248,6 +250,53 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
         self.assertFalse(self.window.symbol_style_box.isEnabled())
         self.window.set_running(False)
         self.assertTrue(self.window.symbol_style_box.isEnabled())
+
+    def test_ad_preserves_attribute_css_inherited_and_tspan_font_sizes(self):
+        data = fixture('C20197')
+        data['result'][0]['svg'] = '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+          <style>.small{font-size:6px !important}</style>
+          <g font-family="Arial" font-size="11px" fill="red">
+            <text id="name" x="10" y="10" font-size="7pt">Name</text>
+            <text id="number" class="small" x="10" y="30">123</text>
+            <text id="inherited" x="10" y="50">Value<tspan id="sub" font-size="50%">sub</tspan></text>
+            <text id="inline" x="10" y="70" style="font-size:15px">Label</text>
+          </g></svg>'''
+        api = SimpleNamespace(get_svg_data_of_component=lambda part: data, check_cancelled=lambda: None)
+        sizes = "Array.from(document.querySelectorAll('#canvas svg text,#canvas svg tspan'), e=>getComputedStyle(e).fontSize)"
+        self.window.show()
+        with patch('main.NetworkApi', return_value=api) as network:
+            self.window.preview_mode_buttons['symbol'].click()
+            self.wait_for_library()
+            original = self.evaluate(self.window.symbol_view, sizes)
+            self.assertEqual(len(set(original)), 5)
+            for index in (1, 0, 1):
+                self.window.symbol_style_box.setCurrentIndex(index)
+                self.wait_for_library()
+                self.assertEqual(self.evaluate(self.window.symbol_view, sizes), original)
+                if index:
+                    styles = self.evaluate(self.window.symbol_view,
+                        "Array.from(document.querySelectorAll('#canvas svg text,#canvas svg tspan'), e=>{const s=getComputedStyle(e);return [s.fontFamily,s.fill];})")
+                    self.assertEqual(styles, [['"Times New Roman"', 'rgb(0, 0, 128)']] * 5)
+            self.assertEqual(network.call_count, 1)
+
+    def test_style_selector_is_only_visible_on_symbol_page_and_retains_export_selection(self):
+        self.window.show()
+        self.assertFalse(self.window.symbol_style_row.isVisible())
+        self.assertFalse(self.window.symbol_style_box.isVisible())
+        with patch.object(self.window, 'show_preview'):
+            self.window.set_preview_mode('symbol')
+            self.assertTrue(self.window.symbol_style_row.isVisible())
+            self.assertTrue(self.window.symbol_style_box.isVisible())
+            self.window.symbol_style_box.setCurrentIndex(1)
+            for mode in ('3d', 'footprint', 'photo'):
+                with self.subTest(mode=mode):
+                    self.window.set_preview_mode(mode)
+                    self.assertFalse(self.window.symbol_style_row.isVisible())
+                    self.assertFalse(self.window.symbol_style_box.isVisible())
+                    self.assertEqual(self.window.export_options().symbol_style, 'ad')
+            self.window.set_preview_mode('symbol')
+            self.assertTrue(self.window.symbol_style_row.isVisible())
+            self.assertEqual(self.window.symbol_style_box.currentData(), 'ad')
 
     def test_symbol_style_is_saved_restored_and_localized_without_changing_value(self):
         from i18n import set_language
@@ -361,6 +410,83 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
                                      [[2.5, 3.5, 'rgb(255, 255, 255)'], [7, 6, 'rgb(255, 255, 255)']])
                     self.assertEqual(self.evaluate(self.window.symbol_view,
                         "getComputedStyle(document.getElementById('background')).fill"), 'rgb(255, 255, 255)')
+            self.assertEqual(network.call_count, 1)
+
+    def test_ad_rectangles_always_use_native_fill_and_transparency_defaults(self):
+        data = fixture('C20197')
+        data['result'][0]['svg'] = '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 140 100">
+          <rect id="background" width="140" height="100" fill="white" stroke="none"/>
+          <g c_para="name`rectangles`" c_origin="0,0">
+            <text id="label" x="20" y="20">Label</text>
+            <rect id="unfilled" x="10" y="10" width="30" height="50" fill="none" stroke="red"/>
+            <rect id="white" x="50" y="10" width="30" height="50" fill="white" stroke="red"/>
+            <rect id="dark" x="90" y="10" width="30" height="50" fill="#880000" stroke="red"/>
+          </g></svg>'''
+        api = SimpleNamespace(get_svg_data_of_component=lambda part: data, check_cancelled=lambda: None)
+        self.window.show()
+        with patch('main.NetworkApi', return_value=api):
+            self.window.preview_mode_buttons['symbol'].click()
+            self.wait_for_library()
+            self.window.symbol_style_box.setCurrentIndex(1)
+            self.wait_for_library()
+            result = self.evaluate(self.window.symbol_view,
+                "['unfilled','white','dark'].map(id=>{const s=getComputedStyle(document.getElementById(id));return [s.fill,s.fillOpacity,s.stroke,s.vectorEffect];})")
+            self.assertEqual(result, [['rgb(255, 255, 176)', '0.5', 'rgb(128, 0, 0)', 'non-scaling-stroke']] * 3)
+            self.assertTrue(self.evaluate(self.window.symbol_view,
+                "['unfilled','white','dark'].every(id=>!!(document.getElementById(id).compareDocumentPosition(document.getElementById('label')) & Node.DOCUMENT_POSITION_FOLLOWING))"))
+            self.window.symbol_style_box.setCurrentIndex(0)
+            self.wait_for_library()
+            fills = self.evaluate(self.window.symbol_view,
+                "['unfilled','white','dark'].map(id=>getComputedStyle(document.getElementById(id)).fill)")
+            self.assertEqual(fills, ['none', 'rgb(255, 255, 255)', 'rgb(136, 0, 0)'])
+
+    def test_ad_pin_extension_preserves_body_names_and_long_pins_in_all_directions(self):
+        data = fixture('C20197')
+        pins = []
+        for row, (dx, dy) in enumerate(((1, 0), (-1, 0), (0, 1), (0, -1))):
+            for col, length in enumerate((0.5, 10, 29.5, 30, 60.5)):
+                bx, by = col * 100, row * 100
+                ex, ey = bx + dx * length, by + dy * length
+                pins.append(f'''<g id="p{row}-{col}" c_partid="part_pin" c_origin="{ex},{ey}">
+                  <circle c_pindot="true" cx="{ex}" cy="{ey}" r="2"/>
+                  <path d="M {ex} {ey} L {bx} {by}" stroke="red" fill="none"/>
+                  <text x="{bx}" y="{by}">NAME</text>
+                  <text x="{ex}" y="{ey}" transform="rotate(270,{ex},{ey})">{col}</text>
+                  <circle cx="{bx}" cy="{by}" r="3" display="none"/>
+                </g>''')
+        data['result'][0]['svg'] = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="-80 -80 600 480">' + ''.join(pins) + '</svg>'
+        api = SimpleNamespace(get_svg_data_of_component=lambda part: data, check_cancelled=lambda: None)
+        geometry = '''Array.from(document.querySelectorAll('g[c_partid=part_pin]'), pin => {
+          const svg=pin.ownerSVGElement, path=pin.querySelector('path'), dot=pin.querySelector('circle[c_pindot]');
+          const root=svg.getCTM().inverse(), m=root.multiply(path.getCTM());
+          const point=(p,m)=>new DOMPoint(p.x,p.y).matrixTransform(m);
+          const a=point(path.getPointAtLength(0),m),b=point(path.getPointAtLength(path.getTotalLength()),m);
+          const text=Array.from(pin.querySelectorAll('text'),t=>{
+            const p=new DOMPoint(Number(t.getAttribute('x')),Number(t.getAttribute('y'))).matrixTransform(root.multiply(t.getCTM()));
+            return [p.x,p.y];});
+          const d=new DOMPoint(dot.cx.baseVal.value,dot.cy.baseVal.value).matrixTransform(root.multiply(dot.getCTM()));
+          return {length:Math.hypot(a.x-b.x,a.y-b.y),outer:[a.x,a.y],body:[b.x,b.y],dot:[d.x,d.y],text};
+        })'''
+        self.window.show()
+        with patch('main.NetworkApi', return_value=api) as network:
+            self.window.preview_mode_buttons['symbol'].click()
+            self.wait_for_library()
+            before = self.evaluate(self.window.symbol_view, geometry)
+            self.window.symbol_style_box.setCurrentIndex(1)
+            self.wait_for_library()
+            after = self.evaluate(self.window.symbol_view, geometry)
+            self.assertEqual(len(after), 20)
+            for old, new in zip(before, after):
+                self.assertAlmostEqual(new['length'], max(30, old['length']), places=3)
+                for axis in (0, 1):
+                    self.assertAlmostEqual(new['body'][axis], old['body'][axis], places=3)
+                    self.assertAlmostEqual(new['dot'][axis], new['outer'][axis], places=3)
+                    self.assertAlmostEqual(new['text'][0][axis], old['text'][0][axis], places=3)
+                    self.assertAlmostEqual(new['text'][1][axis] - old['text'][1][axis],
+                                           (new['outer'][axis] - old['outer'][axis]) / 2, places=3)
+            self.window.symbol_style_box.setCurrentIndex(0)
+            self.wait_for_library()
+            self.assertEqual(self.evaluate(self.window.symbol_view, geometry), before)
             self.assertEqual(network.call_count, 1)
 
     def test_official_pad_css_and_pin_text_survive_browser_rendering(self):

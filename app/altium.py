@@ -202,10 +202,10 @@ def _schlib_component(data, part, check_cancelled, *, merged=False, merge_pcb=Fa
     if fonts is None:
         fonts = [('Times New Roman', 8)]
     def font(family='', size=''):
+        # Preserve the source size independently for names, numbers and labels.
+        size = number(str(size).removesuffix('pt'), 8)
         if style:
-            family, size = style.font, style.font_size
-        else:
-            size = number(str(size).removesuffix('pt'), 8)
+            family = style.font
         pair = (family or 'Times New Roman', size)
         if pair not in fonts:
             fonts.append(pair)
@@ -217,6 +217,7 @@ def _schlib_component(data, part, check_cancelled, *, merged=False, merge_pcb=Fa
                             'SheetPartFileName': '*', 'TargetFileName': '*', 'UniqueID': uuid.uuid4().hex[:8].upper()})]
     pin_count = 0
     owner_part = 1
+    rectangles = []
 
     def common(kind):
         return {'RECORD': kind, 'OwnerIndex': 0, 'OwnerPartId': owner_part, 'IsNotAccesible': 'T'}
@@ -275,10 +276,13 @@ def _schlib_component(data, part, check_cancelled, *, merged=False, merge_pcb=Fa
                 length = _decimal(math.hypot(dx, dy))
                 if length <= 0:
                     raise DownloadError('符号引脚长度必须大于零')
+                if style:
+                    # Location stays at the body end; extend only the outer end.
+                    length = max(length, _decimal(style.min_pin_length))
                 orientation = (0 if dx > 0 else 2) if dx else (1 if dy > 0 else 3)
-                electrical = {0: 4, 1: 0, 2: 1, 3: 2, 4: 7}.get(int(number(header[2], 0)))
-                if electrical is None:
-                    raise DownloadError('符号引脚电气类型不受支持')
+                # All exported pins are Passive in both appearance styles.
+                # Source electrical declarations do not alter this user policy.
+                electrical = 4
                 flags = orientation | 0x20 | (8 if label[0] == '1' else 0) | (16 if designator[0] == '1' else 0)
                 if header[1] != 'show':
                     flags |= 4
@@ -317,11 +321,19 @@ def _schlib_component(data, part, check_cancelled, *, merged=False, merge_pcb=Fa
                 if rounded:
                     _coord_parameter(record, 'CornerXRadius', rx)
                     _coord_parameter(record, 'CornerYRadius', ry)
-                record.update({'Color': color(fields[7]), 'LineWidth': line_width(fields[8]),
-                               'LineStyle': int(number(fields[9], 0)), 'Transparent': 'T' if _unfilled(fields[10]) else 'F'})
-                if not _unfilled(fields[10]):
-                    record.update({'IsSolid': 'T', 'AreaColor': fill_color(fields[10])})
-                records.append(_parameters(record))
+                if style:
+                    # Fill Color and Transparent are independent native flags.
+                    # Keep both enabled, including when the source has no fill.
+                    record.update(Color=color(fields[7]), LineWidth=style.rectangle_line_width,
+                                  LineStyle=0, AreaColor=_color(style.area),
+                                  IsSolid='T' if style.rectangle_filled else 'F',
+                                  Transparent='T' if style.rectangle_transparent else 'F')
+                else:
+                    record.update({'Color': color(fields[7]), 'LineWidth': line_width(fields[8]),
+                                   'LineStyle': int(number(fields[9], 0)), 'Transparent': 'T' if _unfilled(fields[10]) else 'F'})
+                    if not _unfilled(fields[10]):
+                        record.update({'IsSolid': 'T', 'AreaColor': fill_color(fields[10])})
+                (rectangles if style else records).append(_parameters(record))
             elif kind in ('PL', 'PG'):
                 vertices = points(fields[1])
                 if kind == 'PG' and vertices and vertices[-1] != vertices[0]:
@@ -362,6 +374,9 @@ def _schlib_component(data, part, check_cancelled, *, merged=False, merge_pcb=Fa
                 raise DownloadError(f'AD 符号导出暂不支持图元 {kind}')
         except (IndexError, ValueError, TypeError, struct.error) as exc:
             raise DownloadError(f'符号 {kind} 图元数据不完整或超出范围') from exc
+    # Native AD reference places filled rectangles before pins/text. Keep all
+    # source coordinates and per-part owners while avoiding tinted pin labels.
+    records[1:1] = rectangles
     if not pin_count:
         raise DownloadError('官方符号没有可导出的引脚')
 

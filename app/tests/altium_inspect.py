@@ -3,11 +3,45 @@
 This reader is test-only and uses olefile, independently of the Windows COM
 writer. It never imports the production exporter or its format helpers.
 """
+from collections import Counter
 import io
+import json
 import struct
 import zlib
 
 import olefile
+
+
+def source_symbol_text_sizes(data):
+    """Expected source text sizes, using SchLib's integer point precision."""
+    sizes = Counter()
+    for unit_id, unit in enumerate(data.get('subparts') or [data], 1):
+        document = unit['dataStr']
+        if isinstance(document, str):
+            document = json.loads(document)
+        for shape in document['shape']:
+            fields = shape.split('~')
+            if fields[0] == 'P':
+                groups = [group.split('~') for group in shape.split('^^')]
+                for role, group in (('name', groups[3]), ('number', groups[4])):
+                    size = round(float((group[7] or '7pt').removesuffix('pt')))
+                    sizes[unit_id, role, groups[4][4], size] += 1
+            elif fields[0] == 'T' and fields[13] == '1':
+                size = round(float((fields[7] or '8pt').removesuffix('pt')))
+                sizes[unit_id, 'text', fields[12], size] += 1
+    return sizes
+
+
+def symbol_text_sizes(header, records):
+    """Resolve native font IDs so merged/appended font tables can be compared."""
+    sizes = Counter()
+    for row in records:
+        if row.get('RECORD') == '2':
+            for role, key in (('name', 'NAME_CUSTOMFONTID'), ('number', 'DESIGNATOR_CUSTOMFONTID')):
+                sizes[int(row['OWNERPARTID']), role, row['DESIGNATOR'], int(header['SIZE' + row[key]])] += 1
+        elif row.get('RECORD') == '4':
+            sizes[int(row['OWNERPARTID']), 'text', row['TEXT'], int(header['SIZE' + row['FONTID']])] += 1
+    return sizes
 
 
 class Reader:

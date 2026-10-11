@@ -1,7 +1,7 @@
 """Appearance presets shared by SchLib export and the SVG preview.
 
-Appearance changes include square corners for AD rectangles. Bounds, pin
-identities and visibility always belong to the source component.
+Appearance changes include square corners for AD rectangles and a minimum
+pin length. Body bounds, text sizes, pin identities and visibility stay intact.
 """
 from dataclasses import dataclass
 import re
@@ -16,16 +16,19 @@ def normalize_symbol_style(value):
 
 @dataclass(frozen=True)
 class SymbolStyle:
-    # Classic AD colors; use a compact 8pt font for the existing pin spacing.
+    # Calibrated against the user's native AD.SchLib (see the test fixture).
     outline: str = '#800000'
     pin: str = '#000000'
     text: str = '#000080'
     area: str = '#ffffb0'
     font: str = 'Times New Roman'
-    font_size: int = 8
     line_width: int = 1  # AD Small = 10 mil = one EasyEDA schematic unit.
     light_fill_threshold: int = 192
     square_rectangles: bool = True
+    rectangle_line_width: int = 0  # Omitted in AD's file: native hairline.
+    rectangle_filled: bool = True
+    rectangle_transparent: bool = True
+    min_pin_length: int = 30  # Native sample: 30 schematic units = 300 mil.
 
     def fill(self, value):
         """Keep transparent shapes and solid polarity/arrow marks distinct."""
@@ -39,12 +42,14 @@ class SymbolStyle:
         return self.area if sum(bytes.fromhex(value[1:])) / 3 >= self.light_fill_threshold else self.outline
 
     def preview(self):
-        # One source unit is 10 mil; one point is 1/72 inch. SVG font sizes
-        # are expressed in source units, independent of browser pixel density.
+        # Font size belongs to each source text object, not to the preset.
         return dict(outline=self.outline, pin=self.pin, text=self.text, area=self.area,
-                    font=self.font, fontSize=self.font_size / 0.72,
+                    font=self.font,
                     lineWidth=self.line_width, lightFillThreshold=self.light_fill_threshold,
-                    squareRectangles=self.square_rectangles)
+                    squareRectangles=self.square_rectangles,
+                    rectangleLineWidth=self.rectangle_line_width,
+                    rectangleFilled=self.rectangle_filled, rectangleTransparent=self.rectangle_transparent,
+                    minPinLength=self.min_pin_length)
 
 
 AD_STYLE = SymbolStyle()

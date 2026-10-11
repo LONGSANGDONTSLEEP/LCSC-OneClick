@@ -65,20 +65,13 @@ class OfficialAltiumTests(unittest.TestCase):
                 self.assertEqual(header['PARTCOUNT0'], component['PARTCOUNT'])
                 self.assertEqual(len(pins), len(reference))
                 expected = {(int(r['OWNERPARTID']), r['DESIGNATOR']): r for r in reference}
-                declarations = {}
-                for unit_index, unit in enumerate(case['data'].get('subparts') or [case['data']], 1):
-                    for shape in unit['dataStr']['shape']:
-                        if shape.startswith('P~'):
-                            groups = [g.split('~') for g in shape.split('^^')]
-                            declarations[unit_index, groups[4][4]] = int(groups[0][2] or 0)
                 self.assertEqual(Counter((p['part'], p['number']) for p in pins),
                                  Counter((int(r['OWNERPARTID']), r['DESIGNATOR']) for r in reference))
                 for pin in pins:
                     r = expected[pin['part'], pin['number']]
                     self.assertEqual(pin['name'], r['NAME'])
-                    # The official Standard->Pro->AD samples replace electrical
-                    # types with Passive. Preserve the original JSON declaration.
-                    self.assertEqual(pin['electrical'], {0:4, 1:0, 2:1, 3:2, 4:7}[declarations[pin['part'], pin['number']]])
+                    # Both appearance styles now export all pins as Passive.
+                    self.assertEqual(pin['electrical'], 4)
                     self.assertEqual(pin['flags'], int(r['PINCONGLOMERATE']))
                     for key, field in (('x', 'LOCATION.X'), ('y', 'LOCATION.Y'), ('length', 'PINLENGTH')):
                         value = coordinate(r, field) - (coordinate(component, field) if key != 'length' else 0)

@@ -58,7 +58,7 @@ Library merging, appending, PCB project integration, reuse of identical footprin
 | Product information and images | Read full descriptions and parameters, open datasheets, and view original product images with zoom and pan. |
 | Batch part lookup | Enter multiple C-numbers, look up their MPNs automatically, remove duplicate numbers and see results for each part. |
 | STEP / OBJ downloads | Save official 3D models for mechanical assembly, clearance checks and other 3D workflows. |
-| AD schematic libraries | Generate native `.SchLib` files with pin names, numbers, electrical types and multi-unit symbols. |
+| AD schematic libraries | Generate native `.SchLib` files with pin names, numbers, Passive electrical types and multi-unit symbols. |
 | AD footprint libraries | Generate native `.PcbLib` files with pads, holes, slots, copper regions and footprint graphics. |
 | Four preview modes | Switch between 3D models, schematic symbols, PCB footprints and product photos before exporting. |
 | Libraries and PCB projects | Merge libraries, append to existing libraries and add library references to a `.PrjPcb` project. Optionally keep separate exports for each part. |
@@ -125,7 +125,7 @@ Import deduplicates by C-number and retains existing checked states and download
 
 ### Schematic libraries: SchLib
 
-Select `SchLib` to generate a native AD schematic library from official structural component data. Exports retain pin names, actual pin numbers, electrical types, orientation and visibility, as well as text, outlines and source parameters. Alphabetic and combined pin numbers and multi-unit symbols are supported.
+Select `SchLib` to generate a native AD schematic library from official structural component data. Exports retain pin names, actual pin numbers, orientation and visibility, as well as text, outlines and source parameters. All exported pins use the Passive electrical type in both appearance styles. Alphabetic and combined pin numbers and multi-unit symbols are supported.
 
 Multi-unit components are exported using each unit's origin and pin assignment. The symbol's PCB model reference matches the footprint name in the corresponding footprint library.
 
@@ -175,7 +175,7 @@ The same C456013 part is shown on the official storefront below. Symbol and foot
 
 ## Merge, append and PCB project integration
 
-The preview area includes **Symbol style: JLC / AD**. Changing the style updates the symbol preview and applies the same appearance preset to new SchLib exports. JLC is the default; AD uses dark red outlines, black pins, dark blue Times New Roman 8pt text, and pale yellow for existing light fills. AD converts rounded rectangles into native straight rectangles while retaining their bounds, other geometry, pin locations and electrical data. Canvas backgrounds remain white. The selection is saved, and existing entries retain their appearance when appending to a library.
+The **Symbol** preview tab includes **Symbol style: JLC / AD**. Changing the style updates the preview and new SchLib exports. AD uses dark red outlines, black pins and dark blue Times New Roman text while retaining each original text size (SchLib font sizes retain the existing integer-point rounding). Rectangles follow the supplied native reference with both Fill Color and Transparent enabled, regardless of the original fill. Pins shorter than 300 mil extend outward with their body ends fixed; longer pins stay unchanged. JLC retains the original appearance and pin lengths. Both styles export every pin as Passive. Canvas backgrounds remain white. The selection is saved, and existing library entries retain their content when appending.
 
 **Lib → Merge** and **Lib → Append** are mutually exclusive. Each mode exposes its configuration controls.
 

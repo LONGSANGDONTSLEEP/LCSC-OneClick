@@ -44,7 +44,7 @@ def main():
               'source': 'JLCEDA/EasyEDA official library', 'passed': True,
               'regression_tests': result.testsRun, 'components': [],
               'limits': ['Not opened or placed in Altium Designer.',
-                         'Original JSON electrical types retained; official export replaces some with Passive.',
+                         'All exported pins use Passive as requested, independently of source electrical declarations.',
                          'Custom pad anchors may differ; full copper contours are checked within 0.00127 mm.']}
     table = []
     for case in samples:
@@ -75,7 +75,7 @@ def main():
         '27 个器件全部生成原生 SchLib/PcbLib，共 54 份；使用独立 olefile 读取器核对实际库记录。', '',
         '修复：多单元归属及各自原点；真实引脚编号；按轮廓识别标准焊盘；自定义铜区使用从 1 开始的全图元索引关联到焊盘；多层异形铜轮廓；yes/no 等镀孔值；槽孔中心及铜孔偏移；实心极性圆点。', '',
         '几何回归核对单元数量、所有引脚坐标/方向/名称/编号、矩形与椭圆主体、焊盘尺寸/位置/孔径/槽长/旋转/偏移/扩展，以及自定义铜区与焊盘关联。', '',
-        '官方转换链会把部分电气类型改成被动；本项目保留原 JSON 声明。无圆角矩形使用原生 RECT，形状与官方零半径 ROUNDRECT 等价。', '',
+        '按用户要求，所有导出引脚的电气类型统一为 Passive。无圆角矩形使用原生 RECT，形状与官方零半径 ROUNDRECT 等价。', '',
         '标准焊盘参考容差 0.0011 mil；自定义轮廓/曲线容差 0.05 mil（0.00127 mm）。自定义铜区逐轮廓比对，内部锚点位置可与官方不同。', '',
         '尚未完成 Altium Designer 实机打开、放置和 PCB 更新验收。多轮廓区域仍明确失败；PcbLib 不内嵌 STEP。', '',
         '| 编号 | 单元 | 引脚 | 焊盘及孔 | 自定义焊盘 | 结果 |', '|---|---:|---:|---:|---:|---|', *table, '',
