@@ -60,6 +60,22 @@ KiCad 添加封装库时，**库昵称应与导出库名一致**，例如 `LCSC3
 
 具体操作见 [使用说明](app/README.md)。
 
+## KiCad 导出效果
+
+以下为用户提供的 KiCad 实测截图，展示导出的符号和封装。点击图片可查看原图。
+
+| 集成电路符号 | MOS 管符号 |
+| --- | --- |
+| <a href="docs/images/2.3.0-release/kicad-symbol-ic-user.png"><img src="docs/images/2.3.0-release/kicad-symbol-ic-user.png" alt="用户实测：KiCad 中打开集成电路符号，显示引脚与实心主体背景" width="440"></a> | <a href="docs/images/2.3.0-release/kicad-symbol-mosfet-user.png"><img src="docs/images/2.3.0-release/kicad-symbol-mosfet-user.png" alt="用户实测：KiCad 中打开 MOS 管符号，显示引脚编号" width="440"></a> |
+
+| 带过孔的封装 | 自定义焊盘封装 |
+| --- | --- |
+| <a href="docs/images/2.3.0-release/kicad-footprint-vias-user.png"><img src="docs/images/2.3.0-release/kicad-footprint-vias-user.png" alt="用户实测：KiCad 封装中的九个焊盘与四个过孔" width="440"></a> | <a href="docs/images/2.3.0-release/kicad-footprint-custom-pads-user.png"><img src="docs/images/2.3.0-release/kicad-footprint-custom-pads-user.png" alt="用户实测：KiCad 封装中的自定义焊盘与丝印" width="440"></a> |
+
+**带散热焊盘的封装**
+
+<a href="docs/images/2.3.0-release/kicad-footprint-thermal-pad-user.png"><img src="docs/images/2.3.0-release/kicad-footprint-thermal-pad-user.png" alt="用户实测：KiCad 封装中的十五号散热焊盘和两侧引脚焊盘" width="440"></a>
+
 ## AD 导出效果
 
 以下保留此前的 AD 实测截图，展示符号库、封装库和 PCB 工程中的库引用。更多符号、封装及三维示例可展开查看。

@@ -60,6 +60,22 @@ Both targets support multi-unit symbols, string pin numbers and common surface-m
 
 Detailed operations are in the [user guide (Chinese)](app/README.md).
 
+## KiCad export examples
+
+These user-provided KiCad screenshots show exported symbols and footprints. Click any image to view the original.
+
+| IC symbol | MOSFET symbol |
+| --- | --- |
+| <a href="docs/images/2.3.0-release/kicad-symbol-ic-user.png"><img src="docs/images/2.3.0-release/kicad-symbol-ic-user.png" alt="User-provided KiCad IC symbol with pins and solid body-background fill" width="440"></a> | <a href="docs/images/2.3.0-release/kicad-symbol-mosfet-user.png"><img src="docs/images/2.3.0-release/kicad-symbol-mosfet-user.png" alt="User-provided KiCad MOSFET symbol with pin numbers" width="440"></a> |
+
+| Footprint with vias | Custom pad footprint |
+| --- | --- |
+| <a href="docs/images/2.3.0-release/kicad-footprint-vias-user.png"><img src="docs/images/2.3.0-release/kicad-footprint-vias-user.png" alt="User-provided KiCad footprint with nine pads and four vias" width="440"></a> | <a href="docs/images/2.3.0-release/kicad-footprint-custom-pads-user.png"><img src="docs/images/2.3.0-release/kicad-footprint-custom-pads-user.png" alt="User-provided KiCad footprint with custom pads and silkscreen" width="440"></a> |
+
+**Footprint with a thermal pad**
+
+<a href="docs/images/2.3.0-release/kicad-footprint-thermal-pad-user.png"><img src="docs/images/2.3.0-release/kicad-footprint-thermal-pad-user.png" alt="User-provided KiCad footprint with thermal pad 15 and two rows of pins" width="440"></a>
+
 ## AD export examples
 
 These previously shared AD screenshots show exported symbols, footprints and library references in a PCB project. Expand the gallery for additional symbol, footprint and 3D examples.
