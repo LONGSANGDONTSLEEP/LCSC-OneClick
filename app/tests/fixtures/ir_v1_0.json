@@ -1,0 +1,21 @@
+{
+  "@type": "Component",
+  "schema_version": "1.0",
+  "part": "C1",
+  "title": "Historical symbol",
+  "symbol": {
+    "@type": "Symbol",
+    "name": "Historical",
+    "units": [{
+      "@type": "SymbolUnit",
+      "number": 1,
+      "items": [{
+        "@type": "Pin",
+        "number": "A1",
+        "name": "IN",
+        "connection": {"@type": "Point", "x": {"@decimal": "-2.54"}, "y": {"@decimal": "0"}},
+        "body": {"@type": "Point", "x": {"@decimal": "0"}, "y": {"@decimal": "0"}}
+      }]
+    }]
+  }
+}

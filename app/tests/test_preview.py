@@ -125,6 +125,7 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
         self.assertEqual(set(json.loads(settings_path.read_text(encoding='utf-8'))),
                          {'destination', 'step', 'obj', 'schlib', 'pcblib', 'store_proxy', 'update_proxy', 'log_level', 'language', 'theme_mode', 'accent_color', 'accent_text_color', 'font_family', 'font_size', 'auto_backup',
                           'merge_schlib', 'merge_pcblib', 'schlib_name', 'pcblib_name',
+                          'kicad_symbol', 'kicad_footprint', 'kicad_merge', 'kicad_library_name',
                           'keep_schlib', 'keep_pcblib', 'schlib_target', 'pcblib_target', 'project_path',
                           'library_mode', 'symbol_style', 'keep_individual', 'individual_directory', 'project_model_directory',
                           'project_schlib_directory', 'project_pcblib_directory', 'project_schlib_name', 'project_pcblib_name'})
@@ -865,6 +866,7 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
         self.assertEqual(set(json.loads(settings_path.read_text(encoding='utf-8'))),
                          {'destination', 'step', 'obj', 'schlib', 'pcblib', 'store_proxy', 'update_proxy', 'log_level', 'language', 'theme_mode', 'accent_color', 'accent_text_color', 'font_family', 'font_size', 'auto_backup',
                           'merge_schlib', 'merge_pcblib', 'schlib_name', 'pcblib_name',
+                          'kicad_symbol', 'kicad_footprint', 'kicad_merge', 'kicad_library_name',
                           'keep_schlib', 'keep_pcblib', 'schlib_target', 'pcblib_target', 'project_path',
                           'library_mode', 'symbol_style', 'keep_individual', 'individual_directory', 'project_model_directory',
                           'project_schlib_directory', 'project_pcblib_directory', 'project_schlib_name', 'project_pcblib_name'})

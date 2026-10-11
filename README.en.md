@@ -7,7 +7,7 @@
 
 [简体中文](README.md) | **English**
 
-# LCSC3D: LCSC 3D Model Downloader and Altium Designer Library Exporter
+# LCSC3D: LCSC 3D Model Downloader and AD / KiCad Library Exporter
 
 [![Release](https://img.shields.io/github/v/release/Travelerrrrrr/LCSC3D?label=release)](https://github.com/Travelerrrrrr/LCSC3D/releases/latest)
 [![Windows build](https://github.com/Travelerrrrrr/LCSC3D/actions/workflows/windows.yml/badge.svg)](https://github.com/Travelerrrrrr/LCSC3D/actions/workflows/windows.yml)
@@ -15,17 +15,25 @@
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE)
 [![Support LCSC3D](https://img.shields.io/badge/Support-LCSC3D-087AF5)](docs/sponsorship.md)
 
-**Find LCSC parts, inspect prices, stock and product details, download official STEP / OBJ models, and export native Altium Designer libraries in batches.**
+**Find LCSC parts, inspect prices, stock and product details, download official STEP / OBJ models, and export native AD / KiCad libraries in batches.**
 
 LCSC3D is a portable Windows tool for hardware development, PCB design and mechanical fit checks. It combines storefront search, mainland account favorites, model downloads, Altium Designer library export and four preview modes in one application. Download and run `LCSC3D.exe`; no Python installation is required. Exporting AD libraries does not require Altium Designer to be installed either.
 
-**Current development version: 2.2.2** · **[Download the published Windows version](https://github.com/Travelerrrrrr/LCSC3D/releases/latest/download/LCSC3D.exe)** · [Full source package](https://github.com/Travelerrrrrr/LCSC3D/releases/latest/download/LCSC3D.zip) · [Release notes (Chinese)](docs/releases/v2.2.2.md) · [Report an issue](https://github.com/Travelerrrrrr/LCSC3D/issues)
+**Current development version: 2.3.0-demo.1 (local feature preview)** · **[Download the published Windows version](https://github.com/Travelerrrrrr/LCSC3D/releases/latest/download/LCSC3D.exe)** · [Full source package](https://github.com/Travelerrrrrr/LCSC3D/releases/latest/download/LCSC3D.zip) · [Release notes (Chinese)](docs/releases/v2.3.0-demo.1.md) · [Report an issue](https://github.com/Travelerrrrrr/LCSC3D/issues)
 
 **Custom append destinations, library names and direct project import.** Version 2.2.2 supports separate 3D, SchLib and PcbLib folders for project exports, a separate part folder, and a direct library-import button in Append settings. The latest local build is `outputs/LCSC3D.exe`; download links still point to the published version.
 
 ![LCSC3D 2.2.1 unified workspace with an official Type-C 3D model](docs/images/2.2.1-release/main.png)
 
 Screenshots show the actual application, using 2.2.1 except for the updated Append settings. Most are in Simplified Chinese; English settings and international-store screenshots are included below. Product prices and availability may change after the screenshots were taken.
+
+## KiCad export preview
+
+Version 2.3.0-demo.1 adds native KiCad 8+ symbols and footprints, individual and combined libraries, shared-footprint reuse, and simultaneous AD export. A versioned EDA intermediate model preserves source geometry, optional extensions and explicit target capabilities for future adapters.
+
+Select **KiCad → Symbols / Footprints**, optionally enable **Combine KiCad libraries**, and choose a library name. Add the exported `.kicad_sym` file and `.pretty` directory through KiCad's library managers. The footprint library nickname must match the exported name, such as `LCSC3D` or `LCSC3D_C20197`.
+
+This first version creates new libraries and preserves existing same-name destinations. KiCad append, automatic project registration and 3D model placement are not yet supported. Pins default to Passive; native text and colors are used, with pin labels capped at 1.27 mm. Curves may be flattened at 0.00127 mm tolerance, and component-body projections use fabrication outlines, with conversion notices in results. App previews still show the official source resources. Verified with KiCad 8.0.9, 9.0.9, and 10.0.7. The local executable is `outputs/LCSC3D.exe`; online links still point to the published release.
 
 ## What's new in 2.2.2
 

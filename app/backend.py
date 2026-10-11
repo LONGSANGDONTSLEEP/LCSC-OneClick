@@ -28,6 +28,9 @@ from model3d import document, model_reference
 from altium import export_schlib, export_pcblib, export_linked_schlib, export_linked_pcblib, MergedLibrary
 from library_merge import read_library, append_library
 from altium_project import commit_user_file, add_libraries_to_project, read_project
+from easyeda_import import parse_component
+from kicad import FORMATS as KICAD_FORMATS, library_name as kicad_library_name
+from kicad_export import export_batch as export_kicad_batch
 import certifi
 import urllib3
 from urllib3.util import Retry, Timeout
@@ -389,9 +392,15 @@ class Options:
     project_pcblib_name: str = ''
     individual_directory: str = ''
     symbol_style: str = 'jlc'
+    kicad_merge: bool = False
+    kicad_library_name: str = 'LCSC3D'
 
     def __post_init__(self):
         self.symbol_style = normalize_symbol_style(self.symbol_style)
+        if any(fmt in KICAD_FORMATS for fmt in self.formats):
+            if self.append_mode:
+                raise DownloadError('KiCad 首版支持新建库，请关闭 AD 追加模式')
+            kicad_library_name(self.kicad_library_name)
         if self.append_mode:
             targets = self.existing_targets()
             if targets:
@@ -527,17 +536,21 @@ def get_component_metadata(part: str, api: NetworkApi) -> dict[str, str]:
 @traced('download.part', lambda part, options, *a, **kw: {'part': safe_part(part), 'formats': options.formats}, level='INFO')
 def download_part(part: str, options: Options, api: NetworkApi,
                   progress: Callable[[str, str], None] | None = None, *, libraries=None, merge_lock=None,
-                  deferred_outputs=None) -> Result:
+                  deferred_outputs=None, kicad_entries=None) -> Result:
     # A direct one-part request uses the same merge/commit semantics as a batch.
-    if libraries is None and options.merged_paths():
+    if libraries is None and (options.merged_paths() or any(fmt in KICAD_FORMATS for fmt in options.formats)):
         return download_batch([part], options, getattr(api, 'cancelled', None),
                               (lambda index, phase, title: progress(phase, title)) if progress else None,
                               api=api, workers=1)[0]
-    if not options.formats or any(fmt not in ('STEP', 'OBJ', 'SCHLIB', 'PCBLIB') for fmt in options.formats):
-        raise DownloadError('请选择 STEP、OBJ、AD 符号库或 AD 封装库')
+    if not options.formats or any(fmt not in ('STEP', 'OBJ', 'SCHLIB', 'PCBLIB', *KICAD_FORMATS) for fmt in options.formats):
+        raise DownloadError('请选择模型、AD 或 KiCad 元件库格式')
     notify = progress or (lambda phase, title: None)
     notify('查询器件', '')
     data = api.get_cad_data_of_component(part)
+    library_formats = ('SCHLIB', 'PCBLIB', *KICAD_FORMATS)
+    domains = tuple(domain for domain, formats in (('symbol', ('SCHLIB', 'KICAD_SYMBOL')),
+                    ('footprint', ('PCBLIB', 'KICAD_FOOTPRINT'))) if any(fmt in options.formats for fmt in formats))
+    component = parse_component(data, part, api.check_cancelled, domains=domains) if domains else None
     title = str(data.get('title') or '').strip()
     product_id = (data.get('szlcsc') or data.get('lcsc') or {}).get('id')
     store_url = f'https://item.szlcsc.com/{product_id}.html' if product_id else f'https://so.szlcsc.com/global.html?k={part}'
@@ -558,7 +571,7 @@ def download_part(part: str, options: Options, api: NetworkApi,
     except (DownloadError, KeyError, TypeError, ValueError, IndexError) as exc:
         record_error(exc, 'download.model_reference_failed')
         model_error = '器件模型信息缺失或格式不受支持：' + str(exc)
-    if not model and not any(fmt in ('SCHLIB', 'PCBLIB') for fmt in options.formats):
+    if not model and not any(fmt in library_formats for fmt in options.formats):
         result.status = '失败' if model_error else '无模型'
         result.message = model_error or '官方库中没有关联的 3D 模型'
         log_event('WARNING', 'download.part_result', status=result.status, reason='invalid_model' if model_error else 'no_model')
@@ -568,7 +581,7 @@ def download_part(part: str, options: Options, api: NetworkApi,
     basename = f'{part}_{safe_filename(model.name)}' if model else part
     paths = {fmt: (folder / f'{component_name}.SchLib' if fmt == 'SCHLIB' else
                    folder / f'{component_name}.PcbLib' if fmt == 'PCBLIB' else
-                   model_folder / f'{basename}.{fmt.lower()}') for fmt in options.formats}
+                   model_folder / f'{basename}.{fmt.lower()}') for fmt in options.formats if fmt not in KICAD_FORMATS}
     reserved = {path.resolve() for path in options.merged_paths().values()}
     for fmt, path in paths.items():
         if libraries and fmt in libraries and options.keeps_individual(fmt) and path.resolve() in reserved:
@@ -578,6 +591,13 @@ def download_part(part: str, options: Options, api: NetworkApi,
         obj = submit_logged(pool, api.get_raw_3d_model_obj, model.uuid) if model and 'OBJ' in options.formats else None
         for fmt in options.formats:
             api.check_cancelled()
+            if fmt in KICAD_FORMATS:
+                notify('准备导出 KiCad 元件库', title)
+                log_event('INFO', 'download.format_started', format=fmt, stage='convert')
+                with merge_lock:
+                    kicad_entries[part] = (component, folder)
+                result.pending_formats.append(fmt)
+                continue
             path = paths[fmt]
             notify({'SCHLIB': '导出 AD 符号库', 'PCBLIB': '导出 AD 封装库'}.get(fmt, f'下载 {fmt}'), title)
             stage = 'convert' if fmt in ('SCHLIB', 'PCBLIB') else 'download'
@@ -585,7 +605,7 @@ def download_part(part: str, options: Options, api: NetworkApi,
             try:
                 if libraries and fmt in libraries:
                     with merge_lock:
-                        libraries[fmt].add(data, part, api.check_cancelled)
+                        libraries[fmt].add(component, part, api.check_cancelled)
                     result.pending_formats.append(fmt)
                     if not options.keeps_individual(fmt):
                         continue
@@ -593,16 +613,16 @@ def download_part(part: str, options: Options, api: NetworkApi,
                     # Resolve shared/existing footprint names before writing either
                     # member of an independent pair (or a non-merged symbol).
                     with merge_lock:
-                        deferred_outputs.setdefault(part, {})[fmt] = (path, data)
+                        deferred_outputs.setdefault(part, {})[fmt] = (path, component)
                     if fmt not in result.pending_formats:
                         result.pending_formats.append(fmt)
                     continue
                 if fmt == 'SCHLIB':
                     exporter = export_linked_schlib if options.merge_pcblib and 'PCBLIB' in options.formats else export_schlib
-                    payload = exporter(data, part, api.check_cancelled, symbol_style=options.symbol_style)
+                    payload = exporter(component, part, api.check_cancelled, symbol_style=options.symbol_style)
                 elif fmt == 'PCBLIB':
                     exporter = export_linked_pcblib if options.merge_pcblib else export_pcblib
-                    payload = exporter(data, part, api.check_cancelled)
+                    payload = exporter(component, part, api.check_cancelled)
                 elif not model:
                     log_event('WARNING', 'download.format_unavailable', format=fmt, reason='no_model')
                     errors.append(f'{fmt}：' + (model_error or '官方库中没有关联的 3D 模型'))
@@ -664,6 +684,7 @@ def download_batch(parts, options, cancelled=None, progress=None, on_result=None
     libraries = {fmt: MergedLibrary(fmt, merge_pcb='PCBLIB' in merged_paths,
                                    symbol_style=options.symbol_style) for fmt in merged_paths}
     merge_lock = threading.Lock()
+    kicad_entries = {}
     deferred_outputs = {} if 'PCBLIB' in merged_paths else None
     originals, target_errors = {}, {}
     for fmt, path in merged_paths.items():
@@ -680,7 +701,8 @@ def download_batch(parts, options, cancelled=None, progress=None, on_result=None
                 raise Cancelled()
             return download_part(part, options, api,
                 (lambda status, title: progress(index, status, title)) if progress else None,
-                **({'libraries': libraries, 'merge_lock': merge_lock, 'deferred_outputs': deferred_outputs} if libraries else {}))
+                **({'libraries': libraries, 'merge_lock': merge_lock, 'deferred_outputs': deferred_outputs,
+                    'kicad_entries': kicad_entries} if libraries or any(fmt in KICAD_FORMATS for fmt in options.formats) else {}))
         except Cancelled:
             log_event('INFO', 'download.part_cancelled', part=safe_part(part))
             return Result(part, '已取消', message='任务已取消；已保存的完整文件保留')
@@ -800,6 +822,8 @@ def download_batch(parts, options, cancelled=None, progress=None, on_result=None
                 record_error(exc, 'download.format_failed', part=safe_part(result.part), format=fmt, stage=stage)
                 result.export_errors.append(f'{fmt}：{exc}')
                 result.message += '；' + result.export_errors[-1]
+    if kicad_entries:
+        export_kicad_batch(results, kicad_entries, options, api.check_cancelled)
     project_error = ''
     project_files = list(dict.fromkeys(file for result in results for file in result.files
                                       if Path(file).suffix.lower() in ('.schlib', '.pcblib')
@@ -815,7 +839,9 @@ def download_batch(parts, options, cancelled=None, progress=None, on_result=None
             project_error = '加入 PCB 工程失败：' + str(exc)
     for index, result in enumerate(results):
         result.files.sort(key=lambda file: (Path(file) in merged_paths.values(),
-                                            options.formats.index(Path(file).suffix[1:].upper())))
+                                            options.formats.index({'.kicad_sym': 'KICAD_SYMBOL',
+                                                '.kicad_mod': 'KICAD_FOOTPRINT'}.get(
+                                                Path(file).suffix.lower(), Path(file).suffix[1:].upper()))))
         pending = bool(result.pending_formats)
         if pending:
             result.pending_formats.clear()

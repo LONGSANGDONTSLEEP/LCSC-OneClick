@@ -9,23 +9,16 @@ from __future__ import annotations
 from app_logging import traced, safe_part
 
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
-import math
 import re
 import struct
 import uuid
 import zlib
 
 from compound_storage import compound_file
-from eda_geometry import number, points, path_points, polygon_anchor, pad_outline
 from errors import DownloadError
-from model3d import document
-from symbol_style import symbol_style as resolve_symbol_style
 
 SOURCE = 'JLCEDA/EasyEDA Official Library'
 HOMEPAGES = 'https://lceda.cn/ ; https://easyeda.com/'
-LAYERS = {1: 1, 2: 32, 3: 33, 4: 34, 5: 35, 6: 36, 7: 37, 8: 38,
-          10: 57, 11: 74, 12: 61, 13: 63, 14: 64, 15: 58,
-          99: 65, 100: 68, 101: 67, **{n: n - 19 for n in range(21, 51)}}
 LAYER_NAMES = {1: 'TOP', 32: 'BOTTOM', 33: 'TOPOVERLAY', 34: 'BOTTOMOVERLAY',
                35: 'TOPPASTE', 36: 'BOTTOMPASTE', 37: 'TOPSOLDER', 38: 'BOTTOMSOLDER',
                56: 'KEEPOUT', 74: 'MULTILAYER', **{n: f'MECHANICAL{n - 56}' for n in range(57, 73)}}
@@ -104,16 +97,6 @@ def _section(name):
     return re.sub(r'[/\\:!]', '_', name)[:31]
 
 
-def _shapes(doc, kind):
-    shapes = doc.get('shape')
-    if not isinstance(shapes, list) or not shapes or len(shapes) > 100000:
-        raise DownloadError(f'官方库中没有可导出的{kind}图元')
-    for shape in shapes:
-        if not isinstance(shape, str):
-            raise DownloadError(f'{kind}图元数据格式不受支持')
-    return shapes
-
-
 def _color(value):
     value = value or '#000000'
     if re.fullmatch(r'#[0-9a-fA-F]{3}', value):
@@ -138,13 +121,6 @@ def _coord_parameter(record, key, value):
         record[key + '_Frac'] = remainder
 
 
-def _layer(value):
-    try:
-        return LAYERS[int(value)]
-    except (ValueError, KeyError) as exc:
-        raise DownloadError(f'AD 导出暂不支持 EDA 图层 {value}') from exc
-
-
 def _v7_layer(layer):
     if layer == 32:
         return 0x0100ffff
@@ -160,20 +136,6 @@ def _common(layer, keepout=False, polygon=0xffff):
     return struct.pack('<BHHHHI', layer, 0x0c | (0x0200 if keepout else 0), 0xffff, polygon, 0xffff, 0xffffffff)
 
 
-def _pcb_documents(data, part):
-    package = document(data.get('packageDetail'))
-    doc = document(package.get('dataStr'))
-    head = document(doc.get('head'))
-    params = document(head.get('c_para'))
-    name = _library_name(package.get('title') or params.get('package'), part + '_Footprint')
-    return doc, head, name
-
-
-def _source_parameters(head):
-    return {'Source': SOURCE, 'JLCEDA': 'https://lceda.cn/', 'EasyEDA': 'https://easyeda.com/',
-            **({'LibraryLicence': head['licence']} if head.get('licence') else {})}
-
-
 @traced('export.schlib', lambda data, part, *a, **kw: {'part': safe_part(part), 'format': 'SCHLIB'}, level='INFO')
 def export_schlib(data, part, check_cancelled=lambda: None, *, symbol_style='jlc'):
     header, streams = _schlib_component(data, part, check_cancelled, symbol_style=symbol_style)
@@ -183,247 +145,11 @@ def export_schlib(data, part, check_cancelled=lambda: None, *, symbol_style='jlc
 
 def _schlib_component(data, part, check_cancelled, *, merged=False, merge_pcb=False, fonts=None, footprint_name=None,
                      symbol_style='jlc'):
-    style = resolve_symbol_style(symbol_style)
-    doc = document(data.get('dataStr'))
-    head = document(doc.get('head'))
-    params = document(head.get('c_para'))
-    units = data.get('subparts') or [data]
-    if not isinstance(units, list) or len(units) > 32766:
-        raise DownloadError('符号单元数据格式无效或过多')
-    name = _library_name(data.get('title') or params.get('name'), part)
-    _, _, footprint = _pcb_documents(data, part)
-    if merge_pcb:
-        footprint = merged_name(footprint, part)
-    if footprint_name is not None:
-        footprint = footprint_name
-    ox, oy = _decimal(head.get('x', 0)), _decimal(head.get('y', 0))
-    def x(value): return _decimal(value) - ox
-    def y(value): return oy - _decimal(value)
-    if fonts is None:
-        fonts = [('Times New Roman', 8)]
-    def font(family='', size=''):
-        # Preserve the source size independently for names, numbers and labels.
-        size = number(str(size).removesuffix('pt'), 8)
-        if style:
-            family = style.font
-        pair = (family or 'Times New Roman', size)
-        if pair not in fonts:
-            fonts.append(pair)
-        return fonts.index(pair) + 1
-
-    records = [_parameters({'RECORD': 1, 'LibReference': name, 'ComponentDescription': data.get('description') or '',
-                            'PartCount': len(units) + 1, 'DisplayModeCount': 1, 'IndexInSheet': -1, 'OwnerPartId': -1,
-                            'CurrentPartId': 1, 'LibraryPath': '*', 'SourceLibraryName': '*',
-                            'SheetPartFileName': '*', 'TargetFileName': '*', 'UniqueID': uuid.uuid4().hex[:8].upper()})]
-    pin_count = 0
-    owner_part = 1
-    rectangles = []
-
-    def common(kind):
-        return {'RECORD': kind, 'OwnerIndex': 0, 'OwnerPartId': owner_part, 'IsNotAccesible': 'T'}
-
-    def color(value, role='outline'):
-        return _color(getattr(style, role) if style else value)
-
-    def fill_color(value):
-        return _color(style.fill(value) if style else value)
-
-    def line_width(value):
-        return style.line_width if style else min(3, max(0, round(number(value, 1))))
-
-    def polyline(vertices, color, width, dash_style='0', fill='none', closed=False):
-        if len(vertices) < 2:
-            raise DownloadError('符号线段缺少顶点')
-        record = common(7 if closed and not _unfilled(fill) else 6)
-        record.update({'LineWidth': line_width(width), 'Color': _color(style.outline if style else color),
-                       'LineStyle': int(number(dash_style, 0)), 'LocationCount': len(vertices)})
-        if not _unfilled(fill):
-            record.update({'IsSolid': 'T', 'AreaColor': fill_color(fill)})
-        for i, (px, py) in enumerate(vertices, 1):
-            # SchLib parameter vertices use the same 10-mil DXP units as
-            # pin locations. Dividing raw coordinates by 1000 magnifies the
-            # symbol body 100x while leaving its binary pins at normal size.
-            _coord_parameter(record, f'X{i}', x(px))
-            _coord_parameter(record, f'Y{i}', y(py))
-        records.append(_parameters(record))
-
-    # Each subpart has its own placement origin. The top-level shape is an
-    # overview and must not be mixed into the numbered library units.
-    def unit_shapes():
-        for unit_index, unit in enumerate(units, 1):
-            check_cancelled()
-            unit_doc = document(document(unit).get('dataStr'))
-            unit_head = document(unit_doc.get('head'))
-            for shape in _shapes(unit_doc, '符号'):
-                yield unit_index, unit_head, shape
-    for owner_part, unit_head, shape in unit_shapes():
-        check_cancelled()
-        ox, oy = _decimal(unit_head.get('x', 0)), _decimal(unit_head.get('y', 0))
-        fields = shape.split('~')
-        kind = fields[0]
-        try:
-            if kind == 'P':
-                groups = [group.split('~') for group in shape.split('^^')]
-                header, line, label, designator = groups[0], groups[2], groups[3], groups[4]
-                path = path_points(line[0], check_cancelled=check_cancelled)
-                if len(path) != 1 or len(path[0]) != 2:
-                    raise DownloadError('符号引脚必须是一条直线')
-                external, body = path[0]
-                bx, by = x(body[0]), y(body[1])
-                dx, dy = external[0] - body[0], body[1] - external[1]
-                if dx and dy:
-                    raise DownloadError('AD 引脚仅支持 0/90/180/270 度方向')
-                length = _decimal(math.hypot(dx, dy))
-                if length <= 0:
-                    raise DownloadError('符号引脚长度必须大于零')
-                if style:
-                    # Location stays at the body end; extend only the outer end.
-                    length = max(length, _decimal(style.min_pin_length))
-                orientation = (0 if dx > 0 else 2) if dx else (1 if dy > 0 else 3)
-                # All exported pins are Passive in both appearance styles.
-                # Source electrical declarations do not alter this user policy.
-                electrical = 4
-                flags = orientation | 0x20 | (8 if label[0] == '1' else 0) | (16 if designator[0] == '1' else 0)
-                if header[1] != 'show':
-                    flags |= 4
-                pin_name, pin_number = label[4], designator[4] if len(designator) > 4 else header[3]
-                # Native parameter pins retain editable pin text styles as well
-                # as Unicode and fractional geometry. The compact binary form
-                # cannot carry these styles without additional side streams.
-                # Empty EasyEDA pin font fields mean Verdana 7pt, as in its SVG.
-                record = common(2)
-                record.update({'Name': pin_name, 'Designator': pin_number, 'Electrical': electrical,
-                               'FormalType': 1, 'PinConglomerate': flags, 'Color': color(line[1], 'pin'),
-                               'Symbol_InnerEdge': 3 if groups[6][0] == '1' else 0,
-                               'Symbol_OuterEdge': 1 if groups[5][0] == '1' else 0,
-                               'PinName_PositionConglomerate': 16,
-                               'Name_CustomFontID': font(label[6] or 'Verdana', label[7] or '7pt'),
-                               'Name_CustomColor': color(label[8], 'text'),
-                               'PinDesignator_PositionConglomerate': 16,
-                               'Designator_CustomFontID': font(designator[6] or 'Verdana', designator[7] or '7pt'),
-                               'Designator_CustomColor': color(designator[8], 'text')})
-                _coord_parameter(record, 'Location.X', bx)
-                _coord_parameter(record, 'Location.Y', by)
-                _coord_parameter(record, 'PinLength', length)
-                records.append(_parameters(record))
-                pin_count += 1
-            elif kind == 'R':
-                rx, ry = _decimal(fields[3] or '0'), _decimal(fields[4] or '0')
-                if rx < 0 or ry < 0:
-                    raise DownloadError('符号矩形圆角半径无效')
-                rounded = rx > 0 and ry > 0 and not (style and style.square_rectangles)
-                record = common(10 if rounded else 14)
-                _coord_parameter(record, 'Location.X', x(fields[1]))
-                _coord_parameter(record, 'Location.Y', y(_decimal(fields[2]) + _decimal(fields[6])))
-                _coord_parameter(record, 'Corner.X', x(_decimal(fields[1]) + _decimal(fields[5])))
-                _coord_parameter(record, 'Corner.Y', y(fields[2]))
-                # JLC retains source corners; AD uses a native straight rectangle.
-                if rounded:
-                    _coord_parameter(record, 'CornerXRadius', rx)
-                    _coord_parameter(record, 'CornerYRadius', ry)
-                if style:
-                    # Fill Color and Transparent are independent native flags.
-                    # Keep both enabled, including when the source has no fill.
-                    record.update(Color=color(fields[7]), LineWidth=style.rectangle_line_width,
-                                  LineStyle=0, AreaColor=_color(style.area),
-                                  IsSolid='T' if style.rectangle_filled else 'F',
-                                  Transparent='T' if style.rectangle_transparent else 'F')
-                else:
-                    record.update({'Color': color(fields[7]), 'LineWidth': line_width(fields[8]),
-                                   'LineStyle': int(number(fields[9], 0)), 'Transparent': 'T' if _unfilled(fields[10]) else 'F'})
-                    if not _unfilled(fields[10]):
-                        record.update({'IsSolid': 'T', 'AreaColor': fill_color(fields[10])})
-                (rectangles if style else records).append(_parameters(record))
-            elif kind in ('PL', 'PG'):
-                vertices = points(fields[1])
-                if kind == 'PG' and vertices and vertices[-1] != vertices[0]:
-                    vertices.append(vertices[0])
-                polyline(vertices, fields[2], fields[3], fields[4], fields[5], kind == 'PG')
-            elif kind == 'T':
-                if fields[13] != '1':
-                    continue
-                record = common(4)
-                rotation = number(fields[4], 0) % 360
-                if rotation % 90:
-                    raise DownloadError('AD 符号文字暂不支持非直角旋转')
-                record.update({'Text': fields[12], 'FontID': font(fields[6], fields[7]),
-                               'Color': color(fields[5], 'text'), 'Orientation': int(rotation / 90),
-                               'Justification': {'start': 0, 'middle': 1, 'end': 2}.get(fields[10], 0)})
-                _coord_parameter(record, 'Location.X', x(fields[2]))
-                _coord_parameter(record, 'Location.Y', y(fields[3]))
-                records.append(_parameters(record))
-            elif kind in ('C', 'E'):
-                record = common(8)
-                is_circle = kind == 'C'
-                color_index = 4 if is_circle else 5
-                _coord_parameter(record, 'Location.X', x(fields[1]))
-                _coord_parameter(record, 'Location.Y', y(fields[2]))
-                _coord_parameter(record, 'Radius', fields[3])
-                _coord_parameter(record, 'SecondaryRadius', fields[3] if is_circle else fields[4])
-                record.update({'Color': color(fields[color_index]), 'LineWidth': line_width(fields[color_index + 1])})
-                if not _unfilled(fields[color_index + 3]):
-                    record.update({'AreaColor': fill_color(fields[color_index + 3]), 'IsSolid': 'T'})
-                records.append(_parameters(record))
-            elif kind in ('A', 'PT'):
-                paths = path_points(fields[1], check_cancelled=check_cancelled)
-                style_index = 3 if kind == 'A' else 2  # A carries an extra helper-dot field.
-                for vertices in paths:
-                    polyline(vertices, fields[style_index], fields[style_index + 1], fields[style_index + 2],
-                             fields[style_index + 3], bool(vertices and vertices[0] == vertices[-1]))
-            else:
-                raise DownloadError(f'AD 符号导出暂不支持图元 {kind}')
-        except (IndexError, ValueError, TypeError, struct.error) as exc:
-            raise DownloadError(f'符号 {kind} 图元数据不完整或超出范围') from exc
-    # Native AD reference places filled rectangles before pins/text. Keep all
-    # source coordinates and per-part owners while avoiding tinted pin labels.
-    records[1:1] = rectangles
-    if not pin_count:
-        raise DownloadError('官方符号没有可导出的引脚')
-
-    parameters = {'Comment': data.get('title') or name, 'SupplierPart': part,
-                  'Manufacturer': params.get('Manufacturer', ''), 'ManufacturerPart': params.get('Manufacturer Part', ''),
-                  'Footprint': footprint, **_source_parameters(head)}
-    if data.get('description'):
-        parameters['Description'] = data['description']
-    # Preserve the original vendor component attributes, including its licence.
-    parameters.update({key: value for key, value in params.items() if key not in ('name', 'pre', 'package')})
-    designator = common(34)
-    designator.update({'OwnerPartId': -1, 'Name': 'Designator', 'Text': params.get('pre') or 'U?', 'FontID': 1,
-                       'Location.X': 0, 'Location.Y': 0, 'IsHidden': 'T'})
-    if style:
-        designator.update(Color=_color(style.text), FontID=font())
-    records.append(_parameters(designator))
-    for key, value in parameters.items():
-        record = common(41)
-        record.update({'OwnerPartId': -1, 'Name': key, 'Text': value, 'FontID': 1,
-                       'Location.X': 0, 'Location.Y': 0, 'IsHidden': 'T'})
-        if style:
-            record.update(Color=_color(style.text), FontID=font())
-        records.append(_parameters(record))
-    if data.get('packageDetail'):
-        list_index = len(records)
-        records.append(_parameters({'RECORD': 44, 'OwnerIndex': 0}))
-        implementation_index = len(records)
-        records.append(_parameters({'RECORD': 45, 'OwnerIndex': list_index, 'ModelName': footprint,
-                                    'ModelType': 'PCBLIB', 'IsCurrent': 'T', 'DataFileCount': 0}))
-        records.append(_parameters({'RECORD': 46, 'OwnerIndex': implementation_index}))
-        records.append(_parameters({'RECORD': 48, 'OwnerIndex': implementation_index}))
-    header = {'HEADER': 'Protel for Windows - Schematic Library Editor Binary File Version 5.0',
-              'Weight': len(records), 'MinorVersion': 2, 'UniqueID': uuid.uuid4().hex[:8].upper(),
-              'FontIDCount': len(fonts), 'UseMBCS': 'T', 'IsBOC': 'T', 'SheetStyle': 9,
-              # Match a new AD SchLib's editor canvas. Missing values become
-              # black/off/zero rather than inheriting the user's defaults.
-              'BorderOn': 'T', 'SheetNumberSpaceSize': 12, 'Display_Unit': 0,
-              'CustomX': 18000, 'CustomY': 18000, 'UseCustomSheet': 'T', 'ReferenceZonesOn': 'T',
-              'AreaColor': 0xffffff, 'SystemFont': 1, 'SnapGridOn': 'T', 'SnapGridSize': 10,
-              'VisibleGridOn': 'T', 'VisibleGridSize': 10,
-              'CompCount': 1, 'LibRef0': name, 'CompDescr0': data.get('description') or '', 'PartCount0': len(units) + 1}
-    for i, (family, size) in enumerate(fonts, 1):
-        header[f'FontName{i}'], header[f'Size{i}'] = family, round(size)
-    section = _section(part + '_Symbol') if merged else _section(name)
-    streams = {'FileHeader': _parameters(header), 'SectionKeys': _parameters({'KeyCount': 1, 'LibRef0': name, 'SectionKey0': section}),
-               section + '/Data': b''.join(records), 'Storage': _parameters({'HEADER': 'Icon storage'})}
-    return header, streams
+    from easyeda_import import parse_component
+    from altium_ir import schematic
+    return schematic(parse_component(data, part, check_cancelled, domains=('symbol',)), check_cancelled,
+                     merged=merged, merge_pcb=merge_pcb, fonts=fonts, footprint_name=footprint_name,
+                     symbol_style=symbol_style)
 
 
 def _pad_record(layer, center, size, designator, shape, rotation=0, drill=0, plated=True,
@@ -535,212 +261,10 @@ def export_pcblib(data, part, check_cancelled=lambda: None):
 
 
 def _pcblib_component(data, part, check_cancelled, *, merged=False, footprint_name=None):
-    doc, head, name = _pcb_documents(data, part)
-    if merged:
-        name = merged_name(name, part)
-    if footprint_name is not None:
-        name = footprint_name
-    shapes = _shapes(doc, '封装')
-    ox, oy = _decimal(head.get('x', 0)), _decimal(head.get('y', 0))
-    def point(px, py): return _raw(_decimal(px) - ox), _raw(oy - _decimal(py))
-    records, texts, pads = [], [], 0
-    for shape in shapes:
-        check_cancelled()
-        f = shape.split('~')
-        kind = f[0]
-        try:
-            if kind == 'PAD':
-                layer = _layer(f[6])
-                if layer not in (1, 32, 74):
-                    raise DownloadError('AD 焊盘需要顶层、底层或多层图层')
-                copper_center = (number(f[2]), number(f[3]))
-                if len(f) > 19 and f[19]:
-                    center = points(f[19])[0]
-                elif number(f[13], 0) and f[14]:
-                    endpoints = points(f[14])
-                    if len(endpoints) != 2:
-                        raise DownloadError('AD 槽孔中心线无效')
-                    center = tuple((a + b) / 2 for a, b in zip(*endpoints))
-                    # The precise drill centre is in slot_outline; retain the
-                    # independently declared copper centre and its offset.
-                elif f[1] != 'POLYGON' and f[10]:
-                    # Legacy pads omit hole_point and round center_x/y more
-                    # coarsely than their symmetric, already-rotated outline.
-                    # Recover the precise centre from that outline, as in the
-                    # official relay sample, instead of introducing an offset.
-                    outline = points(f[10])
-                    if len(outline) >= 2:
-                        center = copper_center = ((min(p[0] for p in outline) + max(p[0] for p in outline)) / 2,
-                                                   (min(p[1] for p in outline) + max(p[1] for p in outline)) / 2)
-                    else:
-                        center = copper_center
-                else:
-                    center = copper_center
-                size = _raw(f[4]), _raw(f[5])
-                drill = _raw(_decimal(f[9] or '0') * 2)
-                slot = _raw(f[13] or '0')
-                if min(size) <= 0 or drill < 0 or slot < 0:
-                    raise DownloadError('AD 焊盘或钻孔尺寸无效')
-                rotation = number(f[11], 0)
-                outline = None
-                native_shape = f[1]
-                if native_shape == 'POLYGON':
-                    outline = pad_outline(points(f[10]), rotation, check_cancelled=check_cancelled)
-                    if outline.shape:
-                        native_shape = outline.shape
-                        copper_center = outline.center
-                        size = tuple(_raw(v) for v in outline.size)
-                        rotation = outline.rotation
-                        if not drill:
-                            center = copper_center
-                dx, dy = copper_center[0] - number(center[0]), number(center[1]) - copper_center[1]
-                angle = math.radians(rotation)
-                copper_offset = (_raw(math.cos(angle) * dx + math.sin(angle) * dy),
-                                 _raw(-math.sin(angle) * dx + math.cos(angle) * dy))
-                slot_angle = 0
-                if slot:
-                    hole_points = points(f[14])
-                    if len(hole_points) != 2 or not drill or slot < drill:
-                        raise DownloadError('AD 槽孔中心线或尺寸无效')
-                    a, b = hole_points
-                    slot_angle = math.degrees(math.atan2(a[1] - b[1], b[0] - a[0])) - rotation
-                if f[1] not in ('RECT', 'ELLIPSE', 'OVAL', 'POLYGON'):
-                    raise DownloadError('AD 封装导出暂不支持焊盘形状 ' + f[1])
-                # ROTATION is the vendor's CCW angle; Y-flip maps its polygon
-                # into AD's upward-positive coordinate system.
-                plated_text = f[15].strip().lower()
-                if plated_text not in ('y', 'yes', 'true', '1', 'n', 'no', 'false', '0'):
-                    raise DownloadError('AD 焊盘镀孔属性不受支持')
-                plated = plated_text in ('y', 'yes', 'true', '1')
-                paste = _raw(f[17] or '0') if len(f) > 17 else 0
-                solder = _raw(f[18] or '0') if len(f) > 18 else 0
-                if native_shape == 'POLYGON':
-                    vertices = list(outline.vertices)
-                    anchor, clearance = polygon_anchor(vertices, tuple(map(number, center)), check_cancelled=check_cancelled)
-                    if drill:
-                        # Moving a drill to an inscribed anchor would change the
-                        # physical footprint. A through-hole retains its origin.
-                        if anchor != tuple(map(number, center)):
-                            raise DownloadError('自定义通孔焊盘的孔中心不在铜区域内')
-                    else:
-                        center = anchor
-                    diameter = max(drill, 1, _raw(min(clearance * 1.8, min(number(f[4]), number(f[5])) / 2)))
-                    if diameter > _raw(clearance * 2):
-                        raise DownloadError('自定义焊盘的孔或连接锚点超出铜区域')
-                    size, copper_offset = (diameter, diameter), (0, 0)
-                    # AD PADINDEX is the one-based index of the owning primitive
-                    # in Data, including tracks, regions and text before the pad.
-                    # A zero-based pad-only count silently attaches copper to
-                    # another pin or leaves an unattached copper region.
-                    pad_index = len(records) + 1
-                    records.append(_pad_record(layer, point(*center), size, f[8], 1, rotation, drill,
-                                               plated, slot, slot_angle, paste, solder))
-                    # A multilayer custom shape needs top, inner and bottom
-                    # contours. MIDLAYER1 represents the internal pad shape;
-                    # MULTILAYER is not an owning custom-shape copper layer.
-                    for copper_layer in ((1, 2, 32) if layer == 74 else (layer,)):
-                        records.append(_region_record(copper_layer, [point(*p) for p in vertices],
-                                                      pad_index=pad_index, paste=paste, solder=solder))
-                else:
-                    records.append(_pad_record(layer, point(*center), size, f[8],
-                                            {'RECT': 2, 'OCTAGON': 3}.get(native_shape, 1),
-                                            rotation, drill, plated, slot, slot_angle,
-                                            paste, solder, copper_offset))
-                pads += 1
-            elif kind == 'HOLE':
-                diameter = _raw(_decimal(f[3]) * 2)
-                if diameter <= 0:
-                    raise DownloadError('AD 定位孔尺寸无效')
-                records.append(_pad_record(74, point(f[1], f[2]), (diameter, diameter), '', 1, drill=diameter, plated=False))
-            elif kind == 'TRACK':
-                layer, vertices, width = _layer(f[2]), points(f[4]), _raw(f[1])
-                if len(vertices) < 2 or width <= 0:
-                    raise DownloadError('AD 线段尺寸无效')
-                for a, b in zip(vertices, vertices[1:]):
-                    records.append(_track_record(layer, point(*a), point(*b), width))
-            elif kind == 'CIRCLE':
-                radius, width = _raw(f[3]), _raw(f[4])
-                if radius <= 0 or width <= 0:
-                    raise DownloadError('AD 圆形尺寸无效')
-                if f[5] == '101' and width >= radius * 2:
-                    # The official exporter emits these small solid polarity
-                    # dots as disks, not thick rings with twice the diameter.
-                    cx, cy, r = number(f[1]), number(f[2]), number(f[3])
-                    contour = path_points(f'M{cx+r} {cy} A{r} {r} 0 1 0 {cx-r} {cy} A{r} {r} 0 1 0 {cx+r} {cy} Z',
-                                          check_cancelled=check_cancelled)[0][:-1]
-                    records.append(_region_record(_layer(f[5]), [point(*p) for p in contour]))
-                else:
-                    records.append(_arc_record(_layer(f[5]), point(f[1], f[2]), radius, width))
-            elif kind == 'SOLIDREGION':
-                paths = path_points(f[3], check_cancelled=check_cancelled)
-                if len(paths) != 1 or len(paths[0]) < 3:
-                    raise DownloadError('AD 区域暂不支持多轮廓路径')
-                region_kind = {'solid': 0, 'cutout': 1, 'npth': 2}.get(f[4])
-                if region_kind is None:
-                    raise DownloadError('AD 区域类型不受支持：' + f[4])
-                vertices = paths[0]
-                if vertices[-1] == vertices[0]:
-                    vertices = vertices[:-1]
-                records.append(_region_record(_layer(f[1]), [point(*p) for p in vertices], region_kind))
-            elif kind == 'ARC':
-                layer, width = _layer(f[2]), _raw(f[1])
-                for vertices in path_points(f[4], check_cancelled=check_cancelled):
-                    for a, b in zip(vertices, vertices[1:]):
-                        records.append(_track_record(layer, point(*a), point(*b), width))
-            elif kind == 'TEXT':
-                if f[13] != '1':
-                    continue
-                text = f[10]
-                records.append(_text_record(_layer(f[7]), point(f[2], f[3]), _raw(f[9]), _raw(f[4]), number(f[5], 0),
-                                            text, len(texts), f[6] in ('1', 'true')))
-                texts.append(text)
-            elif kind == 'RECT':
-                px, py, w, h, layer = number(f[1]), number(f[2]), number(f[3]), number(f[4]), _layer(f[5])
-                if w <= 0 or h <= 0:
-                    raise DownloadError('AD 矩形区域尺寸无效')
-                vertices = [(px, py), (px + w, py), (px + w, py + h), (px, py + h)]
-                # Extended RECT records distinguish an outline from a solid
-                # area (stroke width at 8, fill style at 9). Older records
-                # without those fields describe solid rectangles.
-                width = _raw(f[8] or '0') if len(f) > 8 else 0
-                filled = len(f) <= 9 or not _unfilled(f[9])
-                if width < 0 or not filled and width == 0:
-                    raise DownloadError('AD 矩形轮廓线宽无效')
-                if filled:
-                    records.append(_region_record(layer, [point(*p) for p in vertices]))
-                if width:
-                    for a, b in zip(vertices, vertices[1:] + vertices[:1]):
-                        records.append(_track_record(layer, point(*a), point(*b), width))
-            elif kind == 'SVGNODE':
-                node = document(shape.partition('~')[2])
-                if document(node.get('attrs')).get('c_etype') != 'outline3D':
-                    raise DownloadError('AD 封装导出暂不支持此 SVG 图元')
-                # STEP embedding/placement is separate from the 2D library export.
-            else:
-                raise DownloadError(f'AD 封装导出暂不支持图元 {kind}')
-        except (IndexError, ValueError, TypeError, struct.error) as exc:
-            raise DownloadError(f'封装 {kind} 图元数据不完整或超出范围') from exc
-    if not pads:
-        raise DownloadError('官方封装没有可导出的焊盘')
-    section = _section(name)
-    version = 'PCB 6.0 Binary Library File'
-    identifier = uuid.uuid4().hex[:8].upper()
-    wide = {f'ENCODEDTEXT{i}': ','.join(str(unit) for unit in struct.unpack('<' + 'H' * (len(text.encode('utf-16le')) // 2), text.encode('utf-16le')))
-            for i, text in enumerate(texts)}
-    streams = {
-        'FileHeader': struct.pack('<I', len(version)) + _short_string(version) + struct.pack('<dI', 5.01, 8) + _short_string(identifier),
-        'SectionKeys': struct.pack('<I', 1) + _string_block(name) + _string_block(section),
-        'Library/Header': struct.pack('<I', 1),
-        'Library/Data': _parameters(_pcb_header()) + struct.pack('<I', 1) + _string_block(name),
-        section + '/Header': struct.pack('<I', len(records)),
-        section + '/Data': _string_block(name) + b''.join(records),
-        section + '/Parameters': _parameters({'PATTERN': name, 'HEIGHT': '0mil', 'DESCRIPTION': data.get('description') or '',
-                                               'ITEMGUID': '', 'REVISIONGUID': '', 'SupplierPart': part, **_source_parameters(head)}),
-        section + '/WideStrings': _parameters(wide),
-    }
-    for folder in ('Models', 'ModelsNoEmbed', 'Textures'):
-        streams[f'Library/{folder}/Header'], streams[f'Library/{folder}/Data'] = struct.pack('<I', 0), b''
-    return name, streams
+    from easyeda_import import parse_component
+    from altium_ir import pcb
+    return pcb(parse_component(data, part, check_cancelled, domains=('footprint',)), check_cancelled,
+               merged=merged, footprint_name=footprint_name)
 
 
 def merged_name(name, part):

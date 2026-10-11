@@ -7,7 +7,7 @@
 
 **简体中文** | [English](README.en.md)
 
-# LCSC3D：立创元件 3D 模型下载与 Altium Designer 元件库导出
+# LCSC3D：立创元件 3D 模型下载与 AD / KiCad 元件库导出
 
 [![Release](https://img.shields.io/github/v/release/Travelerrrrrr/LCSC3D?label=release)](https://github.com/Travelerrrrrr/LCSC3D/releases/latest)
 [![Windows build](https://github.com/Travelerrrrrr/LCSC3D/actions/workflows/windows.yml/badge.svg)](https://github.com/Travelerrrrrr/LCSC3D/actions/workflows/windows.yml)
@@ -15,15 +15,21 @@
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE)
 [![赞助支持 LCSC3D](docs/images/sponsorship/button.svg)](docs/sponsorship.md)
 
-**从立创商城搜索、账号收藏或 C 编号选择元件，查看价格、库存和资料，批量下载 STEP / OBJ、导出 AD 元件库并预览。**
+**从立创商城搜索、账号收藏或 C 编号选择元件，查看价格、库存和资料，批量下载 STEP / OBJ、导出 AD / KiCad 元件库并预览。**
 
-LCSC3D 是面向硬件开发、PCB 设计和结构配合的 Windows 便携工具。它把商城选型、账号收藏、模型下载、Altium Designer 元件库导出和四类预览放在一起。下载 `LCSC3D.exe` 即可运行，无须安装 Python；导出 AD 库也无须在电脑上安装 Altium Designer。
+LCSC3D 是面向硬件开发、PCB 设计和结构配合的 Windows 便携工具。它把商城选型、账号收藏、模型下载、AD / KiCad 元件库导出和四类预览放在一起。下载 `LCSC3D.exe` 即可运行，无须安装 Python；导出 AD 库也无须在电脑上安装 Altium Designer。
 
-**当前开发版本：2.2.2** · **[下载已发布 Windows 程序](https://github.com/Travelerrrrrr/LCSC3D/releases/latest/download/LCSC3D.exe)** · [完整源码包](https://github.com/Travelerrrrrr/LCSC3D/releases/latest/download/LCSC3D.zip) · [使用说明](app/README.md) · [本版更新](docs/releases/v2.2.2.md) · [问题反馈](https://github.com/Travelerrrrrr/LCSC3D/issues)
+**当前开发版本：2.3.0-demo.1（本地功能预览）** · **[下载已发布 Windows 程序](https://github.com/Travelerrrrrr/LCSC3D/releases/latest/download/LCSC3D.exe)** · [完整源码包](https://github.com/Travelerrrrrr/LCSC3D/releases/latest/download/LCSC3D.zip) · [使用说明](app/README.md) · [本版更新](docs/releases/v2.3.0-demo.1.md) · [问题反馈](https://github.com/Travelerrrrrr/LCSC3D/issues)
 
 **追加导出支持自选目录、库名和直接导入工程。** 2.2.2 可分别配置工程的 3D、SchLib、PcbLib 输出，单独设置器件导出目录，并在追加配置页点击按钮导入指定库。本地成品入口为 `outputs/LCSC3D.exe`；下载链接仍指向已公开版本。
 
 ![LCSC3D 2.2.1：一体化浅色工作台与官方 Type-C 3D 模型](docs/images/2.2.1-release/main.png)
+
+## 2.3.0-demo.1：KiCad 导出
+
+支持 KiCad 8+ 原生符号和封装库、独立或批量合并、共享封装去重，以及与 AD 同时导出。官方 JSON 统一转换为可版本化的 EDA 中间层，保留源图元并显式检查目标能力，便于后续增加其他 EDA 适配。
+
+首版新建库，不覆盖同名目标；暂不支持 KiCad 已有库追加、工程自动注册和 3D 自动绑定。已用 KiCad 8.0.9 / 9.0.9 / 10.0.7 验证。参见 [使用方法](app/README.md#kicad-导出第一版) 与 [IR 架构](docs/EDA中间层.md)。本地最新入口是 `outputs/LCSC3D.exe`，线上下载链接仍指向已发布版本。
 
 ## 2.2.2 更新重点
 
