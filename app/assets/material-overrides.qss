@@ -50,9 +50,15 @@ QCheckBox { color:%(text)s; spacing:7px; background:transparent; height:%(contro
 QCheckBox:disabled { color:%(disabled)s; }
 QTableWidget { background:%(surface)s; alternate-background-color:%(field)s; border:0; border-radius:0; gridline-color:%(border)s; outline:0; selection-background-color:%(accent)s; selection-color:%(on_accent)s; }
 QTableWidget::item { padding:6px; border:0; border-bottom:1px solid %(border)s; }
-QTableWidget::item:selected { background:%(accent)s; color:%(on_accent)s; }
+/* Windows item delegates use selection-color; cover upstream :focus rules too. */
+QTableView::item:selected, QTreeView::item:selected, QListView::item:selected,
+QTableView::item:selected:focus, QTreeView::item:selected:focus, QListView::item:selected:focus {
+  background:%(accent)s; selection-background-color:%(accent)s;
+  color:%(on_accent)s; selection-color:%(on_accent)s;
+}
 QHeaderView { background:%(field)s; border:0; }
 QHeaderView::section { background:%(field)s; color:%(muted)s; border:0; border-bottom:1px solid %(border)s; padding:10px 6px; font-weight:600; }
+QTableWidget#downloadTable QHeaderView::section { height:%(control_height)spx; padding:6px; }
 QTableCornerButton::section { background:%(field)s; border:0; }
 QProgressBar { color:%(text)s; border:0; background:%(hover)s; border-radius:3px; height:6px; text-align:center; }
 QProgressBar::chunk { background:%(accent)s; border-radius:3px; }
@@ -63,6 +69,9 @@ QScrollBar:horizontal { background:transparent; height:10px; margin:0; }
 QScrollBar::handle:horizontal { background:%(border)s; border-radius:5px; min-width:26px; }
 QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width:0; }
 QScrollBar::add-page, QScrollBar::sub-page { background:transparent; }
+QTableWidget#downloadTable QScrollBar:vertical { width:14px; }
+QTableWidget#downloadTable QScrollBar::handle:vertical { background:%(control_border)s; border-radius:6px; min-height:36px; }
+QTableWidget#downloadTable QScrollBar::handle:vertical:hover { background:%(accent_ink)s; }
 QSplitter::handle { background:transparent; }
 QToolTip { background:%(surface)s; color:%(text)s; border:1px solid %(border)s; padding:6px; }
 QFrame#previewEmpty, QGraphicsView#photoCanvas { background:%(field)s; border:1px solid %(border)s; border-radius:8px; }
@@ -73,7 +82,7 @@ QLabel#previewStatus[state="ready"] { color:%(success)s; }
 QLabel#productImage { background:%(surface)s; border:1px solid %(border)s; border-radius:8px; }
 QListWidget#thumbnailStrip { border:0; background:%(field)s; padding:8px; }
 QListWidget#thumbnailStrip::item { border:2px solid transparent; border-radius:6px; padding:4px; }
-QListWidget#thumbnailStrip::item:selected { border-color:%(accent)s; background:%(hover)s; color:%(text)s; }
+QListWidget#thumbnailStrip::item:selected { border-color:%(accent)s; background:%(hover)s; selection-background-color:%(hover)s; color:%(text)s; selection-color:%(text)s; }
 
 QFrame#anchoredPanel { background:%(surface)s; border:1px solid %(border)s; border-radius:6px; }
 QListView#comboChoices { background:%(surface)s; color:%(text)s; border:0; outline:0; selection-background-color:%(accent)s; selection-color:%(on_accent)s; }
@@ -97,7 +106,7 @@ QFileDialog#filePicker QListView#sidebar, QFileDialog#filePicker QListView#listV
 QFileDialog#filePicker QTreeView#treeView { background:transparent; color:%(text)s; border:0; padding:0; outline:0; }
 QFileDialog#filePicker QListView#sidebar::item { padding:8px 6px; border:1px solid transparent; border-radius:6px; }
 QFileDialog#filePicker QListView#sidebar::item:hover { background:%(hover)s; }
-QFileDialog#filePicker QListView#sidebar::item:selected { color:%(accent_ink)s; background:%(hover)s; border:1px solid %(accent_ink)s; }
+QFileDialog#filePicker QListView#sidebar::item:selected { color:%(accent_ink)s; selection-color:%(accent_ink)s; background:%(hover)s; selection-background-color:%(hover)s; border:1px solid %(accent_ink)s; }
 QFileDialog#filePicker QListView#listView::item, QFileDialog#filePicker QTreeView#treeView::item { padding:5px 4px; border:0; }
 QFileDialog#filePicker QListView#listView::item:hover, QFileDialog#filePicker QTreeView#treeView::item:hover { background:%(hover)s; }
 QFileDialog#filePicker QListView#listView::item:selected, QFileDialog#filePicker QTreeView#treeView::item:selected { background:%(accent)s; color:%(on_accent)s; }

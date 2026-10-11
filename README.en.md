@@ -175,7 +175,9 @@ The same C456013 part is shown on the official storefront below. Symbol and foot
 
 ## Merge, append and PCB project integration
 
-The **Symbol** preview tab includes **Symbol style: JLC / AD**. Changing the style updates the preview and new SchLib exports. AD uses dark red outlines, black pins and dark blue Times New Roman text while retaining each original text size (SchLib font sizes retain the existing integer-point rounding). Rectangles follow the supplied native reference with both Fill Color and Transparent enabled, regardless of the original fill. Pins shorter than 300 mil extend outward with their body ends fixed; longer pins stay unchanged. JLC retains the original appearance and pin lengths. Both styles export every pin as Passive. Canvas backgrounds remain white. The selection is saved, and existing library entries retain their content when appending.
+The **Symbol** preview tab includes **Symbol style: JLC / AD**. Changing the style updates the preview and new SchLib exports. AD uses dark red outlines, black pins and dark blue Times New Roman text while retaining each original text size (SchLib font sizes retain the existing integer-point rounding). Native rectangles use a Small border with both Fill Color and Transparent enabled, regardless of the original fill. Pins shorter than 200 mil extend outward with their body ends fixed; longer pins stay unchanged. JLC retains the original appearance and pin lengths. Both styles export every pin as Passive. Canvas backgrounds remain white. The selection is saved, and existing library entries retain their content when appending.
+
+The compact input area and table header leave more room for the download list, with a wider scrollbar and pixel scrolling. Batch progress and status appear inside the export control panel below. Text on selected rows follows the configured button text color with or without keyboard focus.
 
 **Lib → Merge** and **Lib → Append** are mutually exclusive. Each mode exposes its configuration controls.
 

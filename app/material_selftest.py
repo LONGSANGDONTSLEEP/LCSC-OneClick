@@ -63,6 +63,23 @@ def start(window, folder):
             assert window.content_scroll.verticalScrollBar().maximum() == 0, 'Default workspace must fit without scrolling'
             report['default_workspace_fits'] = True
             capture(window, 'workspace-symbol-light')
+            window.apply_preferences(Preferences(accent_text_color='#ffffff'))
+            window.input.setPlainText('\n'.join(['C2040', 'C20197'] + ['C' + str(10000 + n) for n in range(38)]))
+            window.load_queue()
+            window.table.setFocus()
+            settle()
+            visible_rows = window.table.viewport().height() // window.table.rowHeight(0)
+            assert visible_rows >= 5 and window.content_scroll.verticalScrollBar().maximum() == 0
+            assert window.export_card.isAncestorOf(window.progress_bar)
+            assert window.export_card.isAncestorOf(window.run_status)
+            report['queue_layout'] = dict(parts=len(window.ids), visible_rows=visible_rows,
+                row_height=window.table.rowHeight(0), header_height=window.table.horizontalHeader().height(),
+                scrollbar_width=window.table.verticalScrollBar().width(), progress_in_export_card=True)
+            capture(window, 'workspace-queue-white-text')
+            window.input.setPlainText('C2040\nC20197')
+            window.load_queue()
+            window.table.item(1, main.DOWNLOAD_COLUMN).setCheckState(Qt.Unchecked)
+            window.apply_preferences(Preferences(theme_mode='light'))
             normal_geometry, hwnd = window.geometry(), int(window.winId())
             window.title_bar.maximize_button.click()
             settle()

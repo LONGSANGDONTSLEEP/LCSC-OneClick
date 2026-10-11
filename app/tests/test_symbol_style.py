@@ -41,13 +41,13 @@ def assert_ad_fonts(test, header, records):
                 test.assertGreater(int(header['SIZE' + row[key]]), 0)
         if row.get('RECORD') == '2':
             test.assertEqual(row['ELECTRICAL'], '4')
-            test.assertGreaterEqual(float(row['PINLENGTH']) + float(row.get('PINLENGTH_FRAC', 0)) / 100000, 30)
+            test.assertGreaterEqual(float(row['PINLENGTH']) + float(row.get('PINLENGTH_FRAC', 0)) / 100000, 20)
             test.assertEqual(row['COLOR'], '0')
             test.assertEqual(row['NAME_CUSTOMCOLOR'], '8388608')
             test.assertEqual(row['DESIGNATOR_CUSTOMCOLOR'], '8388608')
         if row.get('RECORD') in ('6', '7', '8', '10', '14'):
             test.assertEqual(row['COLOR'], '128')
-            test.assertEqual(row['LINEWIDTH'], '0' if row['RECORD'] == '14' else '1')
+            test.assertEqual(row['LINEWIDTH'], '1')
             if 'AREACOLOR' in row:
                 test.assertIn(row['AREACOLOR'], ('128', '11599871'))
             if row['RECORD'] == '14':
@@ -113,7 +113,7 @@ class SymbolLibraryStyleTests(unittest.TestCase):
         data = json.loads((Path(__file__).parent / 'fixtures/C2040.json').read_text('utf-8'))
         index = next(i for i, shape in enumerate(data['dataStr']['shape']) if shape.startswith('P~'))
         for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
-            for length in (0.5, 10, 29.5, 30, 60.5):
+            for length in (0.5, 10, 19.5, 20, 60.5):
                 with self.subTest(direction=(dx, dy), length=length):
                     source = copy.deepcopy(data)
                     groups = source['dataStr']['shape'][index].split('^^')
@@ -124,7 +124,7 @@ class SymbolLibraryStyleTests(unittest.TestCase):
                     _, _, jlc = schematic(export_schlib(source, 'C2040', symbol_style='jlc'))
                     _, _, ad = schematic(export_schlib(source, 'C2040', symbol_style='ad'))
                     self.assertAlmostEqual(jlc[0]['length'], length)
-                    self.assertAlmostEqual(ad[0]['length'], max(30, length))
+                    self.assertAlmostEqual(ad[0]['length'], max(20, length))
                     self.assertEqual({k: v for k, v in jlc[0].items() if k not in ('length', 'color')},
                                      {k: v for k, v in ad[0].items() if k not in ('length', 'color')})
 
@@ -144,7 +144,7 @@ class SymbolLibraryStyleTests(unittest.TestCase):
                 self.assertLess(records.index(rect), next(i for i, r in enumerate(records) if r.get('RECORD') == '2'))
                 for key, value in reference['rectangle'].items():
                     self.assertEqual(rect.get(key), value, key)
-                self.assertEqual(rect.get('LINEWIDTH', '0'), reference['rectangle'].get('LINEWIDTH', '0'))
+                self.assertEqual(rect['LINEWIDTH'], '1')  # User changed Border from hairline to Small.
                 for row in records:
                     for key in ('FONTID', 'NAME_CUSTOMFONTID', 'DESIGNATOR_CUSTOMFONTID'):
                         if key in row:
@@ -212,7 +212,7 @@ class SymbolLibraryStyleTests(unittest.TestCase):
                                  [{k: v for k, v in p.items() if k not in ('color', 'length')} for p in after[2]])
                 self.assertTrue(all(p['electrical'] == 4 for p in before[2] + after[2]))
                 for old, new in zip(before[2], after[2]):
-                    self.assertAlmostEqual(new['length'], max(30, old['length']), places=5)
+                    self.assertAlmostEqual(new['length'], max(20, old['length']), places=5)
                 self.assertEqual(before[0]['PARTCOUNT0'], after[0]['PARTCOUNT0'])
                 assert_ad_fonts(self, after[0], after[1])
                 self.assertEqual(symbol_text_sizes(after[0], after[1]), source_symbol_text_sizes(sample['data']))

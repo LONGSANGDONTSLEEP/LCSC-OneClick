@@ -431,7 +431,9 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
             self.wait_for_library()
             result = self.evaluate(self.window.symbol_view,
                 "['unfilled','white','dark'].map(id=>{const s=getComputedStyle(document.getElementById(id));return [s.fill,s.fillOpacity,s.stroke,s.vectorEffect];})")
-            self.assertEqual(result, [['rgb(255, 255, 176)', '0.5', 'rgb(128, 0, 0)', 'non-scaling-stroke']] * 3)
+            self.assertEqual(result, [['rgb(255, 255, 176)', '0.5', 'rgb(128, 0, 0)', 'none']] * 3)
+            self.assertEqual(self.evaluate(self.window.symbol_view,
+                "['unfilled','white','dark'].map(id=>getComputedStyle(document.getElementById(id)).strokeWidth)"), ['1px'] * 3)
             self.assertTrue(self.evaluate(self.window.symbol_view,
                 "['unfilled','white','dark'].every(id=>!!(document.getElementById(id).compareDocumentPosition(document.getElementById('label')) & Node.DOCUMENT_POSITION_FOLLOWING))"))
             self.window.symbol_style_box.setCurrentIndex(0)
@@ -444,7 +446,7 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
         data = fixture('C20197')
         pins = []
         for row, (dx, dy) in enumerate(((1, 0), (-1, 0), (0, 1), (0, -1))):
-            for col, length in enumerate((0.5, 10, 29.5, 30, 60.5)):
+            for col, length in enumerate((0.5, 10, 19.5, 20, 60.5)):
                 bx, by = col * 100, row * 100
                 ex, ey = bx + dx * length, by + dy * length
                 pins.append(f'''<g id="p{row}-{col}" c_partid="part_pin" c_origin="{ex},{ey}">
@@ -477,7 +479,7 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
             after = self.evaluate(self.window.symbol_view, geometry)
             self.assertEqual(len(after), 20)
             for old, new in zip(before, after):
-                self.assertAlmostEqual(new['length'], max(30, old['length']), places=3)
+                self.assertAlmostEqual(new['length'], max(20, old['length']), places=3)
                 for axis in (0, 1):
                     self.assertAlmostEqual(new['body'][axis], old['body'][axis], places=3)
                     self.assertAlmostEqual(new['dot'][axis], new['outer'][axis], places=3)

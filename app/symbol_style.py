@@ -25,10 +25,10 @@ class SymbolStyle:
     line_width: int = 1  # AD Small = 10 mil = one EasyEDA schematic unit.
     light_fill_threshold: int = 192
     square_rectangles: bool = True
-    rectangle_line_width: int = 0  # Omitted in AD's file: native hairline.
+    rectangle_line_width: int = 1  # User-selected native AD Border: Small.
     rectangle_filled: bool = True
     rectangle_transparent: bool = True
-    min_pin_length: int = 30  # Native sample: 30 schematic units = 300 mil.
+    min_pin_length: int = 20  # User-selected minimum: 200 mil (10 mil per unit).
 
     def fill(self, value):
         """Keep transparent shapes and solid polarity/arrow marks distinct."""

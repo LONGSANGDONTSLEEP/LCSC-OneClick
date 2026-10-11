@@ -428,7 +428,9 @@ class ExportWindowTests(ExportFixture):
             w.lib_append_box.setChecked(mode == 'append')
             w.resize(1060, 740)
             QTest.qWait(30)
-            self.assertLess(w.table.geometry().bottom(), w.progress_bar.geometry().top())
+            self.assertTrue(w.export_card.isAncestorOf(w.progress_bar))
+            self.assertLess(w.table.mapTo(w, w.table.rect().bottomLeft()).y(),
+                            w.progress_bar.mapTo(w, w.progress_bar.rect().topLeft()).y())
             self.assertGreaterEqual(w.width(), w.minimumSizeHint().width())
             self.assertGreaterEqual(w.height(), w.minimumSizeHint().height())
 

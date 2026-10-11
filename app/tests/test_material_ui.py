@@ -7,7 +7,9 @@ import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from PySide6.QtCore import Qt, QEvent
+from PySide6.QtCore import Qt, QEvent, QPoint, QPointF
+from PySide6.QtGui import QWheelEvent
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 from app_settings import Preferences
 from app_theme import theme_manager
@@ -71,9 +73,35 @@ class MaterialUiTests(unittest.TestCase):
             point = w.start_button.mapTo(viewport, w.start_button.rect().center())
             self.assertTrue(viewport.rect().contains(point))
             self.assertGreater(w.table.height(), 80)
-            self.assertLess(w.table.geometry().bottom(), w.progress_bar.geometry().top())
+            self.assertTrue(w.export_card.isAncestorOf(w.progress_bar))
+            self.assertTrue(w.export_card.isAncestorOf(w.run_status))
             self.assertLessEqual(w.width(), 1060)
             self.assertLessEqual(w.height(), 740)
+
+    def test_download_queue_shows_five_rows_and_scrolls_without_moving_workspace(self):
+        w = self.window
+        with patch.object(w, 'request_component_info'), patch.object(w, 'show_preview'):
+            w.input.setPlainText('\n'.join('C' + str(n) for n in range(1, 41)))
+            w.load_queue()
+        w.resize(1380, 880)
+        QTest.qWait(100)
+        self.assertGreaterEqual(w.table.viewport().height(), 5 * w.table.rowHeight(0))
+        self.assertEqual(w.content_scroll.verticalScrollBar().maximum(), 0)
+        bar = w.table.verticalScrollBar()
+        self.assertGreaterEqual(bar.width(), 14)
+        point = w.table.viewport().rect().center()
+        wheel = QWheelEvent(QPointF(point), QPointF(w.table.viewport().mapToGlobal(point)), QPoint(), QPoint(0, -120),
+                            Qt.NoButton, Qt.NoModifier, Qt.NoScrollPhase, False)
+        self.app.sendEvent(w.table.viewport(), wheel)
+        QTest.qWait(50)
+        self.assertGreater(bar.value(), 0)
+        self.assertEqual(w.content_scroll.verticalScrollBar().value(), 0)
+        bar.setFocus()
+        QTest.keyClick(bar, Qt.Key_End)
+        self.assertEqual(bar.value(), bar.maximum())
+        self.assertTrue(w.table.viewport().rect().intersects(w.table.visualItemRect(w.table.item(39, 1))))
+        self.assertTrue(w.export_card.isAncestorOf(w.progress_bar))
+        self.assertTrue(w.export_card.isAncestorOf(w.run_status))
 
     def test_settings_categories_preserve_unsaved_edits_and_cancel(self):
         w = self.window

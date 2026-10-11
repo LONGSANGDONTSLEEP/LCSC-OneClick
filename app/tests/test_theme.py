@@ -172,6 +172,53 @@ class AppearanceTests(unittest.TestCase):
         for widget in (button, label):
             widget.deleteLater()
 
+    def test_selected_table_text_uses_accent_text_color_with_and_without_focus(self):
+        from PySide6.QtWidgets import QAbstractItemView
+        from PySide6.QtGui import QColor
+        from PySide6.QtTest import QTest
+        table = QTableWidget(2, 2)
+        other = QPushButton('Focus elsewhere')
+        table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        table.setAlternatingRowColors(True)
+        for row in range(2):
+            for column, text in enumerate(('C2040 RP2040', 'Success')):
+                item = QTableWidgetItem(text)
+                if column == 1:
+                    item.setForeground(QColor('#117767'))
+                table.setItem(row, column, item)
+        table.setColumnWidth(0, 190)
+        table.setColumnWidth(1, 140)
+        table.resize(420, 240)
+        table.show()
+        other.show()
+        try:
+            for mode in ('light', 'dark'):
+                for color in ('#ffffff', '#000000', '#fff1d6'):
+                    theme_manager().apply(Preferences(theme_mode=mode, accent_text_color=color))
+                    target = QColor(color).getRgb()[:3]
+                    for focused in (True, False):
+                        for row in range(2):
+                            with self.subTest(mode=mode, color=color, focused=focused, row=row):
+                                table.selectRow(row)
+                                if focused:
+                                    table.activateWindow()
+                                    table.setFocus()
+                                else:
+                                    other.activateWindow()
+                                    other.setFocus()
+                                    table.clearFocus()
+                                QTest.qWait(20)
+                                for column in range(2):
+                                    rect = table.visualItemRect(table.item(row, column)).adjusted(6, 4, -6, -4)
+                                    image = table.viewport().grab(rect).toImage()
+                                    matches = sum(max(abs(a - b) for a, b in zip(image.pixelColor(x, y).getRgb()[:3], target)) < 15
+                                                  for y in range(image.height()) for x in range(image.width()))
+                                    self.assertGreater(matches, 10, (column, focused, color))
+        finally:
+            for widget in (table, other):
+                widget.close()
+                widget.deleteLater()
+
     def test_font_missing_on_another_computer_falls_back_to_an_installed_font(self):
         value = Preferences(font_family='LCSC3D missing font 7b972d9')
         theme_manager().apply(value)
