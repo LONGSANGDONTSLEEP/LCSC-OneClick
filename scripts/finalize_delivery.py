@@ -91,7 +91,8 @@ if args.export_dir:
  assert export['success'] and export['frozen'] and export['version']==version
  expected={'merge-grouped','merge-individual','append-grouped','append-individual',
            'append-symbol','append-footprint','project-grouped','project-individual','empty-import',
-           'shared-merge-grouped','shared-merge-individual','shared-append-grouped','shared-append-individual'}
+           'shared-merge-grouped','shared-merge-individual','shared-append-grouped','shared-append-individual',
+           'populated-import','project-custom-grouped','project-custom-individual','append-custom-individual'}
  assert {case['name'] for case in export['cases']}==expected
  assert all(case['success'] for case in export['cases'])
  sys.path.insert(0,str(root/'app/tests'))
@@ -127,7 +128,7 @@ if args.export_dir:
      name,pads,primitives=pcb(board,section)
      assert len(pads)==expected_count
  integration_text+='- Lib 模式专项通过：136 组合覆盖合并/追加、单库/双库、STEP/OBJ、独立导出、工程联动开关及项目重复追加；另测空列表导入、模式恢复、不同库目录、取消、无效库、写入失败与文件竞争。\n'
- integration_text+='- 冻结 EXE 离线执行 13 个完整窗口流程，确认互斥/按需显示、追加路径禁用、库名_3D 目录、配套独立库和空列表直接导入；共享封装用例核对 C23922/C8734 的两个符号均引用同一个 footprint。\n'
+ integration_text+='- 冻结 EXE 离线执行 17 个完整窗口流程，确认互斥/按需显示、追加路径禁用、库名_3D 与自定义目录、自选库名、配套独立库及空/非空列表的配置页按钮导入；共享封装用例核对 C23922/C8734 的两个符号均引用同一个 footprint。\n'
  integration_text+='- C23922 原始 NONE 填充数据导出通过，保留 48 引脚和两个单元；7 类符号填充图元的 4 种大小写/空白写法、PCB 矩形轮廓和非法颜色拒绝均回归通过。\n'
  integration_text+='- 封装去重另测 16 组合：普通合并/追加、SchLib 合并开关与独立导出开关；排除随机焊盘 GUID 和供应商标识后比较物理数据，同名异构加序号，已有条目与旧重复项保留。\n'
  integration_text+='- 新增导出规划、目录规则、库提交和空列表工程导入日志；隔离配置验证日志打包/清除后继续写入，不读取真实登录会话。\n'

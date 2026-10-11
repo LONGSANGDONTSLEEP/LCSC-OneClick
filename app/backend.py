@@ -140,7 +140,7 @@ class NetworkApi:
     """Official component/model APIs with bounded requests and cancellation."""
     def __init__(self, cancelled: threading.Event | None = None, use_cache=True):
         self.cancelled = cancelled or threading.Event()
-        self.headers = {'User-Agent': 'LCSC3D/2.2.1', 'Accept-Encoding': 'gzip',
+        self.headers = {'User-Agent': 'LCSC3D/2.2.2', 'Accept-Encoding': 'gzip',
                         'Accept': '*/*'}
         self.use_cache = use_cache
 
@@ -317,6 +317,12 @@ class Options:
     append_mode: bool = False
     keep_individual: bool = False
     import_existing_to_project: bool = False
+    project_schlib_directory: str = ''
+    project_pcblib_directory: str = ''
+    project_model_directory: str = ''
+    project_schlib_name: str = ''
+    project_pcblib_name: str = ''
+    individual_directory: str = ''
 
     def __post_init__(self):
         if self.append_mode:
@@ -334,6 +340,11 @@ class Options:
     def output_root(self):
         if self.append_mode:
             targets = self.existing_targets()
+            if self.keep_individual and (targets or self.project_path):
+                if self.individual_directory:
+                    return Path(self.individual_directory).expanduser().resolve()
+                if self.project_path:
+                    return Path(self.project_path).expanduser().resolve().parent
             if targets:
                 return next(iter(targets.values())).parent
             if self.project_path:
@@ -346,10 +357,15 @@ class Options:
             targets = self.existing_targets()
             if targets:
                 return targets
-            root = self.output_root()
+            self.output_root()  # Reject append mode without a library or project.
+            root = Path(self.project_path).expanduser().resolve().parent
             name = Path(self.project_path).stem
-            return {fmt: root / library_filename(name, fmt)
-                    for fmt in self.formats if fmt in ('SCHLIB', 'PCBLIB')}
+            return {fmt: (Path(directory).expanduser().resolve() if directory else root)
+                    / library_filename(custom_name or name, fmt)
+                    for fmt, directory, custom_name in (
+                        ('SCHLIB', self.project_schlib_directory, self.project_schlib_name),
+                        ('PCBLIB', self.project_pcblib_directory, self.project_pcblib_name))
+                    if fmt in self.formats}
         return {fmt: Path(target).expanduser().resolve() if target else self.destination / library_filename(name, fmt)
                 for fmt, enabled, name, target in (('SCHLIB', self.merge_schlib, self.schlib_name, self.schlib_target),
                                                   ('PCBLIB', self.merge_pcblib, self.pcblib_name, self.pcblib_target))
@@ -361,6 +377,9 @@ class Options:
         return self.keep_schlib if format == 'SCHLIB' else self.keep_pcblib
 
     def model_folder(self, component_folder):
+        if self.append_mode and self.project_path and not self.existing_targets() and self.project_model_directory:
+            root = Path(self.project_model_directory).expanduser().resolve()
+            return root / component_folder.name if self.keep_individual else root
         paths = self.merged_paths()
         if paths and not any(self.keeps_individual(fmt) for fmt in paths):
             library = paths.get('SCHLIB') or paths['PCBLIB']
@@ -392,8 +411,8 @@ def library_filename(name, format):
 @traced('export.import_existing', level='INFO')
 def import_existing_libraries(options, check_cancelled=lambda: None):
     targets = options.existing_targets()
-    if not options.append_mode or not targets or not options.imports_project():
-        raise DownloadError('请在“追加”中指定已有库和 PCB 工程，并勾选“将已选已有库导入PCB工程”')
+    if not options.append_mode or not targets or not options.project_path:
+        raise DownloadError('请在“追加”中指定已有库和 PCB 工程')
     for fmt, path in targets.items():
         check_cancelled()
         read_library(path, fmt)

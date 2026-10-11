@@ -35,7 +35,7 @@ from app_logging import (configure_logging, log_event, set_log_level, record_err
                          new_context, current_context, log_context, contextual, submit_logged,
                          safe_part, install_exception_hooks, log_runtime)
 from settings_ui import SettingsDialog
-from export_targets import ExportTargetsDialog
+from export_targets import ExportTargetsDialog, APPEND_TEXT_KEYS
 from product_preview import ProductPreview
 from ui_components import IconButton, title_block, surface, HelpDialog, ColumnSplitter
 from shell_ui import PageHost, NotificationCenter, AccountPanel, choose_path, notify
@@ -44,7 +44,7 @@ from branding import BrandLogo
 from international_store import storefront_url
 from app_paths import data_directory, configure_runtime_paths, updates_directory
 
-VERSION = '2.2.1'
+VERSION = '2.2.2'
 DOWNLOAD_COLUMN, PART_COLUMN, MODEL_COLUMN, RESULT_COLUMN = range(4)
 ROOT = Path(getattr(sys, '_MEIPASS', Path(__file__).resolve().parent))
 APP_DIR = Path(sys.executable).parent if getattr(sys, 'frozen', False) else Path(__file__).resolve().parent
@@ -264,8 +264,7 @@ class MainWindow(FramelessMainWindow):
         self.settings_enabled = settings_enabled
         self.preferences = Preferences()
         self.settings_dialog = None
-        self.export_targets = {'schlib_target': '', 'pcblib_target': '', 'project_path': '',
-                               'keep_individual': False, 'import_existing_to_project': False}
+        self.export_targets = {**dict.fromkeys(APPEND_TEXT_KEYS, ''), 'keep_individual': False}
         self._normal_library_formats = None
         self.worker = None
         self.batch_running = False
@@ -732,12 +731,10 @@ class MainWindow(FramelessMainWindow):
         self.keep_schlib_box.setChecked(settings.get('keep_schlib') is True)
         self.keep_pcblib_box.setChecked(settings.get('keep_pcblib') is True)
         self.export_targets = {key: settings[key] if isinstance(settings.get(key), str) else ''
-                               for key in ('schlib_target', 'pcblib_target', 'project_path')}
-        legacy_append = any(self.export_targets.values())
+                               for key in APPEND_TEXT_KEYS}
+        legacy_append = any(self.export_targets[key] for key in ('schlib_target', 'pcblib_target', 'project_path'))
         self.export_targets['keep_individual'] = settings.get('keep_individual',
             settings.get('keep_schlib') is True or settings.get('keep_pcblib') is True) is True
-        self.export_targets['import_existing_to_project'] = settings.get('import_existing_to_project',
-            legacy_append and bool(self.export_targets['project_path'])) is True
         for key, widget in (('schlib_name', self.schlib_name_input), ('pcblib_name', self.pcblib_name_input)):
             value = settings.get(key)
             widget.setText(value if isinstance(value, str) else 'LCSC3D')
@@ -1095,8 +1092,7 @@ class MainWindow(FramelessMainWindow):
         self.update_start_button()
 
     def update_start_button(self):
-        empty = not self.ids and not self.input.toPlainText().strip()
-        self.start_button.setText(ui_text('导入已有库') if empty and self.lib_append_box.isChecked() else ui_text('开始下载'))
+        self.start_button.setText(ui_text('开始下载'))
 
     @traced('queue.delete_checked', level='INFO')
     def remove_checked_downloads(self):
@@ -1264,7 +1260,7 @@ class MainWindow(FramelessMainWindow):
             widget.setEnabled(not self.batch_running)
         for widget in (self.path_input, self.browse_button):
             widget.setEnabled(not self.batch_running and not append)
-        self.path_input.setToolTip(ui_text('追加模式按所选已有库或 PCB 工程的位置导出') if append else '')
+        self.path_input.setToolTip(ui_text('追加模式的导出目录在“配置追加…”中设置') if append else '')
         targeted = append and any(self.export_targets.get(key) for key in ('schlib_target', 'pcblib_target'))
         for key, format_box in (('schlib_target', self.schlib_box), ('pcblib_target', self.pcblib_box)):
             if targeted:
@@ -1281,7 +1277,7 @@ class MainWindow(FramelessMainWindow):
             name.setEnabled(enabled and box.isChecked())
         targets = [self.export_targets[key] for key in ('schlib_target', 'pcblib_target') if self.export_targets.get(key)]
         summary = [ui_message('追加到 {0} 份已有库', len(targets))] if targets else []
-        if self.export_targets.get('project_path') and (not targets or self.export_targets.get('import_existing_to_project')):
+        if self.export_targets.get('project_path') and not targets:
             summary.append(ui_text('下载后加入 PCB 工程'))
         if self.export_targets.get('keep_individual'):
             summary.append(ui_text('独立导出器件'))
@@ -1306,6 +1302,7 @@ class MainWindow(FramelessMainWindow):
         if current is not None:
             current.deleteLater()
         dialog = self.export_dialog = ExportTargetsDialog(self.export_targets, self)
+        dialog.import_requested.connect(lambda values: self.start_existing_library_import(values, dialog))
         def completed(result):
             if result == dialog.DialogCode.Accepted:
                 self.export_targets = dialog.values
@@ -1336,9 +1333,6 @@ class MainWindow(FramelessMainWindow):
             self.run_status.setText(ui_text('请等待备份操作完成后再开始导出。'))
             return
         if self.batch_running or self.worker and self.worker.isRunning():
-            return
-        if self.lib_append_box.isChecked() and not self.ids and not self.input.toPlainText().strip():
-            self.start_existing_library_import()
             return
         formats = tuple(name for name, box in [('STEP', self.step_box), ('OBJ', self.obj_box),
                         ('SCHLIB', self.schlib_box), ('PCBLIB', self.pcblib_box)] if box.isChecked())
@@ -1404,21 +1398,32 @@ class MainWindow(FramelessMainWindow):
         worker.finished.connect(self.worker_finished)
         worker.start()
 
-    def start_existing_library_import(self):
-        if self.settings_dialog is not None and self.settings_dialog.backup_panel.busy:
-            self.run_status.setText(ui_text('请等待备份操作完成后再开始导出。'))
+    def start_existing_library_import(self, values, dialog):
+        if self.batch_running or self.worker and self.worker.isRunning():
             return
-        options = self.export_options()
-        if not options.existing_targets() or not options.imports_project():
-            self.run_status.setText(ui_text('请配置已有库和 PCB 工程，并勾选“将已选已有库导入PCB工程”'))
+        if self.settings_dialog is not None and self.settings_dialog.backup_panel.busy:
+            dialog.status.setText(ui_text('请等待备份操作完成后再开始导出。'))
+            return
+        try:
+            options = Options(data_directory() / 'downloads', (), append_mode=True, **values)
+            has_targets = bool(options.existing_targets() and options.project_path)
+        except (ValueError, OSError) as exc:
+            record_error(exc, 'export.existing_import_rejected', stage='validate')
+            dialog.status.setText(ui_text('无法使用所选文件：') + str(exc))
+            return
+        if not has_targets:
+            dialog.status.setText(ui_text('请在“追加”中指定已有库和 PCB 工程'))
             log_event('WARNING', 'export.existing_import_rejected', reason='missing_targets_or_project_link')
             return
-        self.save_settings()
         self.set_running(True)
-        self.run_status.setText(ui_text('正在将已选已有库加入 PCB 工程…'))
+        dialog.set_import_running(True)
+        self.run_status.setText(ui_text('正在将指定库加入 PCB 工程…'))
+        dialog.status.setText(self.run_status.text())
         worker = LibraryImportWorker(options, self)
         self.worker = worker
         worker.completed.connect(self.complete_existing_library_import)
+        worker.completed.connect(lambda result, error: dialog.status.setText(self.run_status.text()))
+        worker.finished.connect(lambda: dialog.set_import_running(False))
         worker.finished.connect(self.worker_finished)
         worker.start()
 
@@ -1821,7 +1826,7 @@ class MainWindow(FramelessMainWindow):
             '可保存官方 STEP、OBJ，并导出原生 AD SchLib 符号库、PcbLib 封装库；不导出 JSON 或 SVG。<br>'
             'SchLib / PcbLib 可分别勾选合并并自定义库名，合并文件保存在所选目录根部；默认逐器件导出。<br>'
             'Lib「合并」「追加」互斥，勾选后显示配置。未勾选「独立导出器件」时，3D 文件集中到 SchLib 旁的“库名_3D”文件夹；仅有 PcbLib 时跟随其名称。<br>'
-            '「追加」支持只选一种已有库，保存目录由库或工程决定；可同时将所选库加入 PCB 工程。下载列表为空时点击「导入已有库」直接加入工程。<br>'
+            '「追加」仅指定 PCB 工程时，可分别设置 3D、SchLib、PcbLib 的目录和库名；独立器件目录留空时使用工程所在文件夹。<br>在追加配置页指定已有库和工程后，点击「将指定库导入到PCB工程」直接导入，无须下载器件。<br>'
             '相同 footprint 自动复用并同步符号引用；同名不同内容加序号区分。Lib 文件和库内名称不自动追加器件编号。<br>'
             'AD 库保留引脚、焊盘和孔数据，遇到不支持的图元会提示失败；PcbLib 不内嵌 3D 模型。<br>'
             '未合并的文件单独保存到“器件名_编号”目录，AD 库文件按元件型号命名；下载时覆盖已有同名文件。<br>'

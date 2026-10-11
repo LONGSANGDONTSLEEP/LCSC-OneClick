@@ -19,24 +19,21 @@
 
 LCSC3D is a portable Windows tool for hardware development, PCB design and mechanical fit checks. It combines storefront search, mainland account favorites, model downloads, Altium Designer library export and four preview modes in one application. Download and run `LCSC3D.exe`; no Python installation is required. Exporting AD libraries does not require Altium Designer to be installed either.
 
-**Current version: 2.2.1** · **[Download for Windows](https://github.com/Travelerrrrrr/LCSC3D/releases/latest/download/LCSC3D.exe)** · [Full source package](https://github.com/Travelerrrrrr/LCSC3D/releases/latest/download/LCSC3D.zip) · [Release notes (Chinese)](docs/releases/v2.2.1.md) · [Report an issue](https://github.com/Travelerrrrrr/LCSC3D/issues)
+**Current development version: 2.2.2** · **[Download the published Windows version](https://github.com/Travelerrrrrr/LCSC3D/releases/latest/download/LCSC3D.exe)** · [Full source package](https://github.com/Travelerrrrrr/LCSC3D/releases/latest/download/LCSC3D.zip) · [Release notes (Chinese)](docs/releases/v2.2.2.md) · [Report an issue](https://github.com/Travelerrrrrr/LCSC3D/issues)
 
-**A new logo, a unified interface and restorable backups.** Version 2.2.1 introduces a blue L logo and a light theme with the brand-blue accent by default. The workspace, store, sign-in and settings share one window. You can manage automatic backups, inspect their disk usage, restore files and clear old backups.
+**Custom append destinations, library names and direct project import.** Version 2.2.2 supports separate 3D, SchLib and PcbLib folders for project exports, a separate part folder, and a direct library-import button in Append settings. The latest local build is `outputs/LCSC3D.exe`; download links still point to the published version.
 
 ![LCSC3D 2.2.1 unified workspace with an official Type-C 3D model](docs/images/2.2.1-release/main.png)
 
-Screenshots show the actual application. Most are in Simplified Chinese; English settings and international-store screenshots are included below. Product prices and availability may change after the screenshots were taken.
+Screenshots show the actual application, using 2.2.1 except for the updated Append settings. Most are in Simplified Chinese; English settings and international-store screenshots are included below. Product prices and availability may change after the screenshots were taken.
 
-## What's new in 2.2.1
+## What's new in 2.2.2
 
 | Update | What it provides |
 | --- | --- |
-| **Unified window** | An integrated title bar with minimize, maximize/restore, close, drag and resize controls. Store, sign-in, images, settings and help are displayed within the main window. |
-| **New logo and default light theme** | Updated application, EXE and window icons. New users start with a light theme and brand-blue accent; saved appearance preferences are retained. |
-| **Backup management and restoration** | Enable or disable automatic backups, check file counts and disk usage, restore a selected backup, or clear backups. The current target file is preserved before restoration overwrites it. |
-| **Themes, fonts and languages** | Simplified Chinese / English, system / light / dark appearance, preset or custom accent colors, button text colors, installed fonts and a 10–24px font size. |
-| **International storefront** | English mode uses LCSC International for English product information, USD prices, stock and original images. |
-| **Settings and support** | Appearance, Network, Diagnostics, About & support, and Backups categories, with links to star the repository and support the author. |
+| **Project output folders and names** | With only a PCB project selected, configure separate 3D, SchLib and PcbLib folders and both library names. Blank values use defaults; existing libraries are appended. |
+| **Separate part folder** | Choose a folder for individual exports. When blank, it defaults to the PCB project folder, or the existing library folder if no project is selected. |
+| **Direct project import** | Click **Import specified libraries into PCB project** below the target files in Append settings. Requires both a library and a project; no downloads are needed. |
 
 Library merging, appending, PCB project integration, reuse of identical footprints and separate part exports remain available. Earlier changes are listed in the [version history (Chinese)](docs/版本历史.md).
 
@@ -180,15 +177,15 @@ The same C456013 part is shown on the official storefront below. Symbol and foot
 **Lib → Merge** and **Lib → Append** are mutually exclusive. Each mode exposes its configuration controls.
 
 - **Merge:** Enable SchLib and/or PcbLib merging and set library names. Successfully converted parts are saved into merged libraries at the output-folder root. Existing files with the same names are replaced only after successful generation. Separate per-part exports can also be retained.
-- **Append:** Choose an existing SchLib, PcbLib or both. Only the corresponding selected formats are appended. The output location follows the library or project, and the ordinary output-folder control is disabled.
+- **Append:** Choose an existing SchLib, PcbLib or both. Only the corresponding selected formats are appended. Configure destinations in Append settings; the ordinary output-folder control is disabled.
 - **Footprint reuse:** Identical footprints reuse an entry. Different footprints with the same name receive numeric suffixes, and symbol references are updated to match.
-- **PCB project:** Choose a `.PrjPcb` file and enable **Import selected libraries into the PCB project** to add successfully appended libraries after export. With an empty download list, **Import libraries** adds the selected existing libraries directly.
-- **Project-only destination:** When only a project is selected, matching libraries are created beside it using the project name, or appended to if they already exist.
-- **Export each part:** Enable this to also save individual libraries and models. When disabled, STEP / OBJ files are placed in a `library-name_3D` folder beside SchLib, or beside PcbLib when no SchLib is used.
+- **PCB project:** Specify existing libraries and a `.PrjPcb` file, then click **Import specified libraries into PCB project** in Append settings. It imports the current selections immediately, regardless of whether the download queue is empty. Duplicate references are skipped. The old saved checkbox no longer triggers automatic imports.
+- **Project-only destination:** Choose separate folders for 3D models, SchLib and PcbLib, and customize both library names. Blank library folders and names default to the project folder and name. Generated libraries are added to the project; existing libraries are appended.
+- **Export each part:** Also save individual libraries and models in a configurable part folder. A blank folder defaults to the project folder, or the existing library folder without a project. An explicit 3D folder takes precedence for models and uses part subfolders when this option is enabled. Without separate exports or an explicit 3D folder, models use a `library-name_3D` folder beside the primary library.
 
 Existing libraries and projects are backed up before modification by default. Manage the automatic-backup setting and restore files in **Settings → Backups**. More detailed instructions are available in the [user guide (Chinese)](app/README.md#追加已有库与-pcb-工程).
 
-![Append configuration with existing libraries, separate exports and PCB project integration](docs/images/2.2.1-release/append-targets.png)
+![2.2.2 Append settings with project output folders and library names](docs/images/2.2.2-release/append-project.png)
 
 ## Batch downloads and file management
 
@@ -297,7 +294,9 @@ Each stable release provides:
 - **AD export limits:** Unsupported geometry is reported as an export failure. IntLib generation and automatic embedding/binding of 3D models in PcbLib are not currently supported.
 - **Design checks:** Preview and export aid part selection and inspection. Verify pins, dimensions and footprints against the part's datasheet before using them in production designs.
 
-The **2.2.1 release verification record** reports **447 local regression tests**, covering the unified window, themes, language switching, backups, storefront operations, exports and updates. Existing checks also cover **136 export-mode combinations**, **16 shared-footprint combinations** and **27 official AD comparison samples**. The actual EXE was checked with UI, settings/diagnostics, backup, offline-store and export self-tests, plus public online resources. See the [verification record (Chinese)](docs/验证记录.md) for the recorded scope and results.
+Version **2.2.2 passed 452 local regression tests**, including custom project destinations and names, separate part folders, direct library imports and settings migration. The actual EXE export self-test covers **17 complete UI flows**, alongside Material UI and settings/diagnostics checks. See the [2.2.2 verification record (Chinese)](docs/2.2.2验证记录.md).
+
+Existing checks also cover **136 original export-mode combinations**, **16 shared-footprint combinations** and **27 official AD comparison samples**. Earlier public online checks, screenshots and AD evidence remain in the [2.2.1 verification record (Chinese)](docs/验证记录.md).
 
 ## Run from source and build
 

@@ -347,7 +347,10 @@ def start(window, destination):
             window.keep_schlib_box.setChecked(True)
             window.export_targets = {'schlib_target': 'D:/库/原库.SchLib', 'pcblib_target': '',
                                      'project_path': 'D:/工程/测试.PrjPcb',
-                                     'keep_individual': True, 'import_existing_to_project': True}
+                                     'keep_individual': True, 'individual_directory': 'D:/器件',
+                                     'project_schlib_directory': 'D:/符号', 'project_pcblib_directory': 'D:/封装',
+                                     'project_model_directory': 'D:/模型', 'project_schlib_name': '项目符号',
+                                     'project_pcblib_name': '项目封装'}
             window.lib_append_box.setChecked(True)
             dialog.store_proxy_combo.setCurrentIndex(1)
             dialog.log_level_combo.setCurrentIndex(dialog.log_level_combo.findData('ERROR'))
@@ -368,7 +371,13 @@ def start(window, destination):
             assert window.export_targets['project_path'] == 'D:/工程/测试.PrjPcb'
             assert window.lib_append_box.isChecked() and not window.lib_merge_box.isChecked()
             assert not window.path_input.isEnabled()
-            assert window.export_targets['keep_individual'] and window.export_targets['import_existing_to_project']
+            assert window.export_targets['keep_individual'] and window.export_targets['individual_directory'] == 'D:/器件'
+            assert window.export_targets['project_model_directory'] == 'D:/模型'
+            assert window.export_targets['project_schlib_directory'] == 'D:/符号'
+            assert window.export_targets['project_pcblib_directory'] == 'D:/封装'
+            assert window.export_targets['project_schlib_name'] == '项目符号'
+            assert window.export_targets['project_pcblib_name'] == '项目封装'
+            assert 'import_existing_to_project' not in window.export_targets
             report['library_options_restored'] = True
             report['restored_from_disk'] = True
             assert not log_event('DEBUG', 'settings.self_test_debug')

@@ -91,7 +91,7 @@ class ExportFixture(unittest.TestCase):
             singles = [file for file in files if file.suffix.lower() in ('.schlib', '.pcblib') and file not in paths.values()]
             self.assertEqual(len(singles), len(paths) if keep else 0)
             model_files = [file for file in files if file.suffix.lower() in ('.step', '.obj')]
-            folder = options.output_root() / (backend.safe_filename(row.title) + '_' + row.part) if keep else primary.with_name(primary.stem + '_3D')
+            folder = options.model_folder(options.output_root() / (backend.safe_filename(row.title) + '_' + row.part))
             self.assertTrue(all(file.parent == folder for file in model_files))
             for file in model_files:
                 self.assertEqual(file.read_bytes(), STEP if file.suffix == '.step' else OBJ.encode('utf-8'))
@@ -172,6 +172,71 @@ class ExportMatrixTests(ExportFixture):
                                  else root / 'RP2040_C2040')
                 self.assertEqual(len(row.files), 3 + int(sch_merge and sch_keep) + int(pcb_merge and pcb_keep))
 
+    def test_project_custom_destinations_names_and_repeated_append(self):
+        for number, (formats, keep) in enumerate(itertools.product(AD_CHOICES, (False, True))):
+            with self.subTest(formats=formats, keep=keep):
+                root = self.root / str(number)
+                project = self.project(root / 'project')
+                options = backend.Options(root / 'unused', ('STEP', 'OBJ') + formats, append_mode=True,
+                    project_path=str(project), keep_individual=keep,
+                    project_schlib_directory=str(root / 'symbols'), project_schlib_name='自选符号.SchLib',
+                    project_pcblib_directory=str(root / 'footprints'), project_pcblib_name='自选封装',
+                    project_model_directory=str(root / 'models'), individual_directory=str(root / 'parts'))
+                rows = backend.download_batch(['C2040', 'C20197'], options, api=self.api)
+                self.assert_outputs(options, rows, ('STEP', 'OBJ'), keep)
+                paths = options.merged_paths()
+                self.assert_libraries(paths, 2)
+                for fmt, folder, name in (('SCHLIB', 'symbols', '自选符号.SchLib'),
+                                          ('PCBLIB', 'footprints', '自选封装.PcbLib')):
+                    if fmt in formats:
+                        self.assertEqual(paths[fmt], root / folder / name)
+                for row in rows:
+                    part_folder = backend.safe_filename(row.title) + '_' + row.part
+                    models = root / 'models' / part_folder if keep else root / 'models'
+                    self.assertTrue(all(Path(file).parent == models for file in row.files
+                                        if Path(file).suffix in ('.step', '.obj')))
+                    singles = [Path(file) for file in row.files if Path(file).suffix in ('.SchLib', '.PcbLib')
+                               and Path(file) not in paths.values()]
+                    self.assertTrue(all(file.parent == root / 'parts' / part_folder for file in singles))
+                references = [line.split('=', 1)[1] for line in project.read_text(encoding='utf-8').splitlines()
+                              if line.startswith('DocumentPath=')][1:]
+                self.assertEqual({(project.parent / value).resolve() for value in references}, set(paths.values()))
+                before = project.read_bytes()
+                rows = backend.download_batch(['C2765186'], options, api=self.api)
+                self.assertEqual(rows[0].status, '成功')
+                self.assert_libraries(paths, 3)
+                self.assertEqual(project.read_bytes(), before)
+                self.assertFalse((root / 'unused').exists())
+                self.assertFalse((root / 'parts').exists() and not keep)
+
+    def test_individual_directory_defaults_to_project_and_never_relocates_target_libraries(self):
+        project = self.project(self.root / 'project')
+        targets = self.targets(self.root / 'libraries', ('SCHLIB', 'PCBLIB'))
+        for has_project, custom in itertools.product((False, True), repeat=2):
+            with self.subTest(project=has_project, custom=custom):
+                options = backend.Options(self.root / 'unused', ('STEP',), append_mode=True, **targets,
+                    project_path=str(project) if has_project else '', keep_individual=True,
+                    individual_directory=str(self.root / 'individual') if custom else '',
+                    project_schlib_directory=str(self.root / 'inactive-symbols'),
+                    project_schlib_name='../invalid', project_model_directory=str(self.root / 'inactive-models'))
+                expected = self.root / ('individual' if custom else 'project' if has_project else 'libraries')
+                self.assertEqual(options.output_root(), expected)
+                rows = backend.download_batch(['C2040', 'C20197'], options, api=self.api)
+                self.assert_outputs(options, rows, ('STEP',), True)
+                self.assertEqual(options.existing_targets(), options.merged_paths())
+                self.assertFalse((self.root / 'inactive-symbols').exists())
+                self.assertFalse((self.root / 'inactive-models').exists())
+        self.assertEqual(project.read_text(encoding='utf-8').count('DocumentPath='), 1)
+
+    def test_project_default_libraries_are_independent_of_custom_individual_directory(self):
+        project = self.project(self.root / 'project')
+        options = backend.Options(self.root / 'unused', ('STEP', 'SCHLIB', 'PCBLIB'), append_mode=True,
+            project_path=str(project), keep_individual=True, individual_directory=str(self.root / 'parts'))
+        rows = backend.download_batch(['C2040', 'C20197'], options, api=self.api)
+        self.assert_outputs(options, rows, ('STEP',), True)
+        self.assertEqual({file.parent for file in options.merged_paths().values()}, {project.parent})
+        self.assertTrue(all(file.stem == project.stem for file in options.merged_paths().values()))
+
     def test_different_library_directories_use_schematic_folder_for_models(self):
         targets = {**self.targets(self.root / 'symbols', ('SCHLIB',)),
                    **self.targets(self.root / 'footprints', ('PCBLIB',))}
@@ -227,7 +292,7 @@ class ExportMatrixTests(ExportFixture):
         with self.assertRaises(Cancelled):
             backend.import_existing_libraries(options, cancel)
         self.assertEqual(project.read_bytes(), original)
-        options.import_existing_to_project = False
+        options.project_path = ''
         with self.assertRaises(DownloadError):
             backend.import_existing_libraries(options)
         with self.assertRaises(DownloadError):
@@ -397,19 +462,22 @@ class ExportWindowTests(ExportFixture):
         self.assertFalse(w.lib_append_box.isChecked())
         self.assertTrue(w.path_input.isEnabled())
 
-    def test_append_dialog_gate_tracks_each_path_and_clears_stale_check(self):
+    def test_append_dialog_gates_import_project_outputs_and_individual_directory(self):
         d = self.dialog()
         self.assertEqual(d.keep_box.text(), '独立导出器件')
         for sch, pcb, project in itertools.product((False, True), repeat=3):
             d.inputs['schlib_target'].setText('test.SchLib' if sch else '')
             d.inputs['pcblib_target'].setText('test.PcbLib' if pcb else '')
             d.inputs['project_path'].setText('test.PrjPcb' if project else '')
-            self.assertEqual(d.project_box.isEnabled(), (sch or pcb) and project)
-            if d.project_box.isEnabled():
-                d.project_box.setChecked(True)
-                d.inputs['project_path'].clear()
-                self.assertFalse(d.project_box.isEnabled())
-                self.assertFalse(d.project_box.isChecked())
+            self.assertIsInstance(d.import_button, QPushButton)
+            self.assertEqual(d.import_button.text(), '将指定库导入到PCB工程')
+            self.assertEqual(d.import_button.toolTip(), '将上方指定lib导入到指定的PCB工程中。')
+            self.assertEqual(d.import_button.isEnabled(), (sch or pcb) and project)
+            self.assertEqual(d.project_outputs.isEnabled(), project and not (sch or pcb))
+            self.assertEqual(d.project_outputs.isHidden(), not (project and not (sch or pcb)))
+        for keep in (True, False):
+            d.keep_box.setChecked(keep)
+            self.assertEqual(d.inputs['individual_directory'].isEnabled(), keep)
 
     def test_append_dialog_validates_without_writing_and_keeps_unlinked_project(self):
         d = self.dialog()
@@ -425,7 +493,7 @@ class ExportWindowTests(ExportFixture):
         self.assertEqual(d.result(), d.DialogCode.Accepted)
         self.assertEqual(d.values['project_path'], str(project))
         self.assertTrue(d.values['keep_individual'])
-        self.assertFalse(d.values['import_existing_to_project'])
+        self.assertNotIn('import_existing_to_project', d.values)
         self.assertEqual(project.read_bytes(), original)
 
     def test_inactive_targets_never_leak_and_single_target_locks_corresponding_format(self):
@@ -448,26 +516,40 @@ class ExportWindowTests(ExportFixture):
         self.assertFalse(w.export_options().schlib_target)
         self.assertFalse(w.export_options().project_path)
 
-    def test_empty_queue_direct_import_runs_without_component_requests_or_download_directory(self):
+    def test_configuration_button_imports_current_unsaved_targets_with_any_queue(self):
         w = self.window
         targets = self.targets(self.root, ('SCHLIB', 'PCBLIB'))
         project = self.project(self.root)
-        w.export_targets.update(**targets, project_path=str(project), import_existing_to_project=True)
         w.lib_append_box.setChecked(True)
-        self.assertEqual(w.start_button.text(), '导入已有库')
-        with patch.object(main, 'NetworkApi', side_effect=AssertionError('No resource requests allowed')):
-            w.start_button.click()
-            self.assertIsInstance(w.worker, main.LibraryImportWorker)
-            self.assertTrue(w.worker.wait(10000))
-            self.app.processEvents()
-        self.assertIn('新增 2 份库', w.run_status.text())
-        self.assertFalse(w.batch_running)
-        self.assertFalse(w.path_input.isEnabled())
-        self.assertEqual(w.table.rowCount(), 0)
+        self.assertEqual(w.start_button.text(), '开始下载')
+        w.configure_export_targets()
+        dialog = w.export_dialog
+        for key, value in {**targets, 'project_path': str(project)}.items():
+            dialog.inputs[key].setText(value)
+        for populated in (False, True):
+            if populated:
+                w.input.setPlainText('C2040')
+                w.load_queue()
+                w.table.item(0, main.DOWNLOAD_COLUMN).setCheckState(Qt.Unchecked)
+            with patch.object(main, 'NetworkApi', side_effect=AssertionError('No resource requests allowed')):
+                dialog.import_button.click()
+                self.assertIsInstance(w.worker, main.LibraryImportWorker)
+                self.assertFalse(dialog.import_button.isEnabled())
+                self.assertFalse(dialog.save_button.isEnabled())
+                dialog.reject()
+                self.assertFalse(dialog._page_finished)
+                self.assertTrue(w.worker.wait(10000))
+                self.app.processEvents()
+            self.assertIn('跳过 2 份' if populated else '新增 2 份库', dialog.status.text())
+            self.assertFalse(w.batch_running)
+            self.assertTrue(dialog.import_button.isEnabled())
+        self.assertEqual(w.export_targets['project_path'], '')
         self.assertFalse((self.root / 'downloads').exists())
         self.assertEqual(project.read_text(encoding='utf-8').count('DocumentPath='), 3)
+        for fmt, file in targets.items():
+            self.assertEqual(Path(file).read_bytes(), self.originals[fmt.removesuffix('_target').upper()])
 
-    def test_empty_queue_missing_link_does_not_write_and_nonempty_unchecked_queue_does_not_import(self):
+    def test_download_never_imports_existing_libraries_for_empty_or_unchecked_queue(self):
         w = self.window
         targets = self.targets(self.root, ('SCHLIB',))
         project = self.project(self.root)
@@ -476,14 +558,48 @@ class ExportWindowTests(ExportFixture):
         w.lib_append_box.setChecked(True)
         w.start_button.click()
         self.assertIsNone(w.worker)
-        self.assertIn('并勾选', w.run_status.text())
-        w.export_targets['import_existing_to_project'] = True
         w.input.setPlainText('C2040')
         w.load_queue()
         w.table.item(0, main.DOWNLOAD_COLUMN).setCheckState(Qt.Unchecked)
         w.start_button.click()
         self.assertIsNone(w.worker)
         self.assertIn('至少勾选', w.run_status.text())
+        self.assertEqual(project.read_bytes(), original)
+
+    def test_project_fields_validate_names_and_directories_without_writing(self):
+        d = self.dialog({'project_path': str(self.project(self.root / 'project'))})
+        d.inputs['project_schlib_name'].setText('../unsafe')
+        d.save()
+        self.assertIn('文件名', d.status.text())
+        d.inputs['project_schlib_name'].setText('自选符号.SchLib')
+        d.inputs['project_model_directory'].setText(d.inputs['project_path'].text())
+        d.save()
+        self.assertIn('目录不能是文件', d.status.text())
+        d.inputs['project_model_directory'].setText(str(self.root / 'new-models'))
+        d.inputs['individual_directory'].setText(str(self.root / 'new-parts'))
+        d.keep_box.setChecked(True)
+        d.save()
+        self.assertEqual(d.result(), d.DialogCode.Accepted)
+        self.assertEqual(d.values['project_schlib_name'], '自选符号.SchLib')
+        self.assertFalse((self.root / 'new-models').exists())
+        self.assertFalse((self.root / 'new-parts').exists())
+
+    def test_import_failure_restores_button_and_preserves_project(self):
+        w = self.window
+        project = self.project(self.root)
+        original = project.read_bytes()
+        invalid = self.root / 'invalid.SchLib'
+        invalid.write_bytes(b'not a library')
+        w.configure_export_targets()
+        d = w.export_dialog
+        d.inputs['project_path'].setText(str(project))
+        d.inputs['schlib_target'].setText(str(invalid))
+        d.import_button.click()
+        self.assertTrue(w.worker.wait(10000))
+        self.app.processEvents()
+        self.assertIn('失败', d.status.text())
+        self.assertTrue(d.import_button.isEnabled())
+        self.assertTrue(d.save_button.isEnabled())
         self.assertEqual(project.read_bytes(), original)
 
     def test_settings_roundtrip_and_legacy_mode_migration(self):
@@ -495,20 +611,26 @@ class ExportWindowTests(ExportFixture):
         targets = self.targets(self.root, ('PCBLIB',))
         with patch.object(main, 'SETTINGS_PATH', path):
             for mode in ('individual', 'merge', 'append'):
-                w.export_targets.update(**targets, keep_individual=True, import_existing_to_project=False)
+                w.export_targets.update(**targets, keep_individual=True,
+                    project_model_directory=str(self.root / 'models'), project_schlib_name='测试符号',
+                    project_pcblib_name='测试封装', project_schlib_directory=str(self.root / 'symbols'),
+                    project_pcblib_directory=str(self.root / 'footprints'), individual_directory=str(self.root / 'parts'))
+                expected = w.export_targets.copy()
                 w.lib_merge_box.setChecked(mode == 'merge')
                 w.lib_append_box.setChecked(mode == 'append')
                 w.save_settings()
                 w._restore_settings()
                 self.assertEqual(w.library_mode(), mode)
                 self.assertTrue(w.export_targets['keep_individual'])
-                self.assertFalse(w.export_targets['import_existing_to_project'])
+                self.assertEqual(w.export_targets, expected)
             path.write_text(json.dumps({**targets, 'merge_pcblib': True, 'keep_pcblib': True,
-                                       'project_path': str(self.project(self.root))}), encoding='utf-8')
+                                       'project_path': str(self.project(self.root)),
+                                       'import_existing_to_project': True}), encoding='utf-8')
             w._restore_settings()
             self.assertEqual(w.library_mode(), 'append')
             self.assertTrue(w.export_targets['keep_individual'])
-            self.assertTrue(w.export_targets['import_existing_to_project'])
+            self.assertNotIn('import_existing_to_project', w.export_targets)
+            self.assertFalse(w.export_options().imports_project())
 
 
 if __name__ == '__main__':
