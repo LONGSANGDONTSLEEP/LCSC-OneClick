@@ -19,9 +19,10 @@ root = args.output.resolve()
 root.mkdir(parents=True, exist_ok=True)
 fixtures = root / 'fixtures'
 fixtures.mkdir(exist_ok=True)
-for part in ('C20197', 'C2765186', 'C23922', 'C8734', 'C2040'):
+for part in ('C20197', 'C2765186', 'C23922', 'C8734', 'C2040', 'C5879483'):
     shutil.copyfile(ROOT / 'app/tests/fixtures' / (part + '.json'), fixtures / (part + '.json'))
 shutil.copyfile(ROOT / 'app/tests/fixtures/C2040_svgs.json', fixtures / 'C2040_svgs.json')
+shutil.copyfile(ROOT / 'app/tests/fixtures/C5879483_svgs.json', fixtures / 'C5879483_svgs.json')
 env = os.environ.copy()
 env.update(LOCALAPPDATA=str(root / 'LocalAppData'), APPDATA=str(root / 'AppData'),
            TEMP=str(root / 'Temp'), TMP=str(root / 'Temp'), KICAD_CONFIG_HOME=str(root / 'kicad-config'), PYTHONUTF8='1')
@@ -34,23 +35,30 @@ assert process.returncode == 0, process.returncode
 report = json.loads((root / 'kicad-verification.json').read_text('utf-8'))
 version = re.search(r"VERSION = '([^']+)'", (ROOT / 'app/main.py').read_text('utf-8')).group(1)
 assert report['success'] and report['frozen'] and report['version'] == version, report
-assert [c['name'] for c in report['cases']] == ['individual', 'combined', 'merge-symbols', 'merge-footprints', 'footprint-only', 'ad', 'collision', 'preview-sample']
+assert [c['name'] for c in report['cases']] == ['individual', 'combined', 'merge-symbols', 'merge-footprints', 'footprint-only', 'copies', 'reversed', 'ad', 'ad-layout', 'ad-replace', 'replace', 'preview-sample']
 assert report['kicad_preview_verified']
 assert report['preview_painted_pixels_verified']
+assert report['reversed_pin_preview_verified'] and report['wrapped_results_and_card_spacing_verified']
 sys.path[:0] = [str(ROOT / 'app'), str(ROOT / 'app/tests')]
 from altium_inspect import schematic, pcb
 ad = next(c for c in report['cases'] if c['name'] == 'ad')
 for name in ad['files']:
     path = Path(name)
-    pins = 8 if 'C20197' in str(path) else 14
+    pins = 8 if 'C20197' in str(path) else 2 if 'C5879483' in str(path) else 14
     if path.suffix == '.SchLib':
         assert len(schematic(path.read_bytes())[2]) == pins
+        if pins == 2:
+            actual = {p['number']:p for p in schematic(path.read_bytes())[2]}
+            assert [(actual[n]['x'],actual[n]['length'],actual[n]['flags']&3) for n in ('1','2')] == [(-10,20,2),(10,20,0)]
     if path.suffix == '.PcbLib':
-        assert len(pcb(path.read_bytes())[1]) == (8 if pins == 8 else 18)
+        assert len(pcb(path.read_bytes())[1]) == (18 if pins == 14 else pins)
 from test_kicad import sexpr, children, child
 from easyeda_import import parse_component
 from eda_ir import Pin
 from kicad import pin_electrical_type
+assert schematic((root/'ad-layout/lcsc3d_v2_3_0_hb.SchLib').read_bytes())[0]['COMPCOUNT'] == '12'
+assert schematic((root/'ad-replace/lcsc3d_v2_3_0_hb.SchLib').read_bytes())[0]['COMPCOUNT'] == '1'
+assert len(children(sexpr((root/'replace/LCSC3D.kicad_sym').read_bytes()),'symbol')) == 1
 for case in report['cases']:
     for name in case['files']:
         path = Path(name)
@@ -69,7 +77,7 @@ for case in report['cases']:
             ref = props['Footprint']
             library, footprint = ref.split(':')
             assert len(list((root / case['name']).rglob(library + '.pretty/' + footprint + '.kicad_mod'))) == 1
-for name, symbols, footprints in (('combined', 1, 1), ('merge-symbols', 1, 2), ('merge-footprints', 2, 1), ('footprint-only', 0, 1)):
+for name, symbols, footprints in (('combined', 1, 1), ('merge-symbols', 1, 2), ('merge-footprints', 2, 1), ('footprint-only', 0, 1), ('copies',3,3)):
     assert len(list((root / name).rglob('*.kicad_sym'))) == symbols
     assert len(list((root / name).rglob('*.pretty'))) == footprints
 if args.cli:

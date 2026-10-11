@@ -4,21 +4,26 @@ import json
 from pathlib import Path
 import sys
 import time
+import shutil
 
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import QTimer, QPoint
 from PySide6.QtWidgets import QApplication
 
 
 def start(window, folder):
-    import main
+    main = sys.modules[type(window).__module__]
     root = Path(folder).resolve()
     root.mkdir(parents=True, exist_ok=True)
     data = {part: json.loads((root / 'fixtures' / (part + '.json')).read_text('utf-8'))
-            for part in ('C20197', 'C2765186', 'C23922', 'C8734', 'C2040')}
+            for part in ('C20197', 'C2765186', 'C23922', 'C8734', 'C2040', 'C5879483')}
     class OfflineApi(main.NetworkApi):
+        def fetch(self, *args, **kwargs):
+            raise AssertionError('Offline self-test must not access the network')
         def get_cad_data_of_component(self, part):
             self.check_cancelled()
-            return data[part]
+            return data['C5879483'] if part.startswith('C90000') else data[part]
+        def get_step_3d_model(self, uuid):
+            return b'ISO-10303-21;\nEND-ISO-10303-21;\n'
     main.NetworkApi = OfflineApi
     window.request_component_info = lambda: None
     window.show_preview = lambda *args, **kwargs: None
@@ -28,8 +33,12 @@ def start(window, folder):
              ('merge-symbols', True, False, 'kicad', ['C23922', 'C8734']),
              ('merge-footprints', False, True, 'kicad', ['C23922', 'C8734']),
              ('footprint-only', False, True, 'kicad', ['C23922', 'C8734']),
-             ('ad', False, False, 'ad', ['C20197', 'C2765186']),
-             ('collision', True, True, 'kicad', ['C23922', 'C8734']),
+             ('copies', True, True, 'kicad', ['C23922','C8734']),
+             ('reversed', False, False, 'kicad', ['C5879483']),
+             ('ad', False, False, 'ad', ['C20197', 'C2765186', 'C5879483']),
+             ('ad-layout', False, False, 'ad', ['C5879483'] + [f'C90000{i}' for i in range(11)]),
+             ('ad-replace', False, False, 'ad', ['C5879483']),
+             ('replace', True, True, 'kicad', ['C5879483']),
              ('preview-sample', True, True, 'kicad', ['C2040'])]
     state = {'index': -1, 'phase': 'next', 'deadline': time.monotonic() + 90, 'done': False}
     report = {'version': main.VERSION, 'frozen': bool(getattr(sys, 'frozen', False)), 'cases': []}
@@ -52,6 +61,12 @@ def start(window, folder):
     def hashes(path):
         return {str(p.relative_to(path)): hashlib.sha256(p.read_bytes()).hexdigest()
                 for p in path.rglob('*') if p.is_file()}
+    def verify_layout():
+        def top(widget): return widget.mapTo(window, QPoint(0,0)).y()
+        assert top(window.detail) >= top(window.table) + window.table.height() + 8
+        assert window.detail.height() >= window.detail.heightForWidth(window.detail.width())
+        assert top(window.export_card) >= top(window.workspace_splitter) + window.workspace_splitter.height() + 12
+        report['wrapped_results_and_card_spacing_verified'] = True
     def tick():
         try:
             if time.monotonic() > state['deadline']:
@@ -69,26 +84,36 @@ def start(window, folder):
                     return
                 name, symbols, footprints, target, parts = cases[state['index']]
                 ad = target == 'ad'
-                output = root / ('combined' if name == 'collision' else name)
+                output = root / name
+                if name in ('replace','ad-replace'):
+                    shutil.copytree(root/('combined' if name == 'replace' else 'ad-layout'), output)
                 state.update(name=name, output=output, before=hashes(output), parts=parts)
                 window.lib_append_box.setChecked(False)
-                window.lib_merge_box.setChecked(False)
-                window.step_box.setChecked(False)
+                window.lib_merge_box.setChecked(name in ('ad-layout','ad-replace'))
+                window.step_box.setChecked(name == 'copies')
                 window.obj_box.setChecked(False)
                 window.schlib_box.setChecked(ad)
                 window.pcblib_box.setChecked(ad)
                 window.export_target_box.setCurrentIndex(window.export_target_box.findData(target))
                 window.kicad_symbol_box.setChecked(name != 'footprint-only')
                 window.kicad_footprint_box.setChecked(True)
+                window.kicad_lib_merge_box.setChecked(symbols or footprints)
                 window.kicad_merge_symbol_box.setChecked(symbols)
                 window.kicad_merge_footprint_box.setChecked(footprints)
                 window.kicad_electrical_box.setCurrentIndex(window.kicad_electrical_box.findData(
                     'input' if name == 'merge-symbols' else 'source'))
-                window.kicad_name_input.setText('LCSC3D')
+                window.kicad_symbol_name_input.setText('Symbols' if name == 'copies' else 'LCSC3D')
+                window.kicad_footprint_name_input.setText('Pads' if name == 'copies' else 'LCSC3D')
+                window.keep_kicad_symbol_box.setChecked(name == 'copies')
+                window.keep_kicad_footprint_box.setChecked(name == 'copies')
+                window.schlib_name_input.setText('lcsc3d_v2_3_0_hb')
+                window.pcblib_name_input.setText('lcsc3d_v2_3_0_hb')
+                window.symbol_style_box.setCurrentIndex(window.symbol_style_box.findData('ad'))
                 window.path_input.setText(str(output))
                 window.input.setPlainText('\n'.join(parts))
                 assert window.load_queue()
                 expected = ('SCHLIB', 'PCBLIB') if ad else ('KICAD_FOOTPRINT',) if name == 'footprint-only' else ('KICAD_SYMBOL', 'KICAD_FOOTPRINT')
+                if name == 'copies': expected = ('STEP',) + expected
                 assert window.export_options().formats == expected
                 window.start_batch()
                 state['phase'] = 'wait'
@@ -123,23 +148,56 @@ def start(window, folder):
                 if body_pixels > 50:
                     window.grab().save(str(root / 'kicad-preview.png'))
                     report['preview_painted_pixels_verified'] = True
-                    finish()
+                    from library_preview import build_library_preview
+                    window.export_target_box.setCurrentIndex(window.export_target_box.findData('ad'))
+                    window.schlib_box.setChecked(True)
+                    window.pcblib_box.setChecked(True)
+                    window.lib_merge_box.setChecked(True)
+                    window.path_input.setText(str(root/'ad-layout'))
+                    window.input.setPlainText('\n'.join(row.part for row in state['layout_rows']))
+                    window.load_queue()
+                    for index,row in enumerate(state['layout_rows']): window.update_result(index,row)
+                    window.complete_batch(state['layout_rows'])
+                    window.current_preview = 'C5879483'
+                    preview = build_library_preview(json.loads((root/'fixtures/C5879483_svgs.json').read_text('utf-8')), 'C5879483')
+                    window.library_cache['C5879483'] = preview
+                    window.display_library_preview('C5879483', preview)
+                    state['phase'] = 'ad-preview'
                 elif time.monotonic() > state['capture_after'] + 3:
                     snapshot.save(str(root / 'preview-missing-pixels.png'))
                     window.grab().save(str(root / 'window-missing-pixels.png'))
                     finish('KiCad preview has no painted symbol pixels')
+            elif state['phase'] == 'ad-preview' and window.symbol_view.load_state[0] == 'ready':
+                state['phase'] = 'inspect-ad'
+                def inspect_pins(value):
+                    try:
+                        pins = {p[0]:p[1:] for p in json.loads(value)}
+                        assert pins == {'1':[370,300,390,300,370,300], '2':[430,300,410,300,430,300]}, pins
+                        report['reversed_pin_preview_verified'] = True
+                        state.update(phase='capture-ad', capture_after=time.monotonic()+0.6)
+                    except Exception as exc: finish('Pin preview: '+str(exc))
+                window.symbol_view.page().runJavaScript('''JSON.stringify([...document.querySelectorAll('g[c_partid=part_pin]')].map(pin=>{
+                    const p=pin.querySelector('path'),d=pin.querySelector('circle[c_pindot]');
+                    const a=p.getPointAtLength(0),b=p.getPointAtLength(p.getTotalLength());
+                    return [pin.getAttribute('c_spicepin'),a.x,a.y,b.x,b.y,d.cx.baseVal.value,d.cy.baseVal.value];}))''', inspect_pins)
+            elif state['phase'] == 'capture-ad' and time.monotonic() >= state['capture_after']:
+                verify_layout()
+                window.grab().save(str(root/'ad-reversed-and-layout.png'))
+                finish()
             elif state['phase'] == 'wait' and not window.batch_running and not (window.worker and window.worker.isRunning()):
                 rows = [window.results[p] for p in state['parts']]
-                if state['name'] == 'collision':
-                    assert all(r.status == '失败' and '已存在' in r.message for r in rows)
-                    assert hashes(state['output']) == state['before']
-                else:
-                    assert all(r.status == '成功' for r in rows), [r.message for r in rows]
-                    assert all(Path(p).is_file() for r in rows for p in r.files)
-                    if state['name'] == 'combined':
-                        assert len(list(state['output'].glob('*.pretty/*.kicad_mod'))) == 1
+                assert all(r.status == '成功' for r in rows), [r.message for r in rows]
+                assert all(Path(p).is_file() for r in rows for p in r.files)
+                if state['name'] in ('combined','replace'):
+                    assert len(list(state['output'].glob('*.pretty/*.kicad_mod'))) == 1
+                if state['name'] in ('replace','ad-replace'):
+                    assert hashes(state['output']) != state['before']
                 if state['name'] == 'merge-footprints':
                     window.grab().save(str(root / 'kicad-controls.png'))
+                if state['name'] == 'copies':
+                    window.grab().save(str(root/'kicad-copies-controls.png'))
+                if state['name'] == 'ad-layout':
+                    state['layout_rows'] = rows
                 report['cases'].append({'name': state['name'], 'statuses': [r.status for r in rows],
                                         'files': sorted(set(p for r in rows for p in r.files)), 'success': True})
                 state['phase'] = 'next'

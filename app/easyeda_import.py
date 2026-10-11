@@ -120,6 +120,21 @@ def stroke(color, width, style='0'):
     return Stroke(length(width, '1'), color, STYLES.get(style_id, 'source_style_' + str(style_id)))
 
 
+def pin_endpoints(header, dot, endpoints):
+    """SVG drawing order is not electrical direction; the pin dot is authoritative."""
+    start, end = endpoints
+    if start == end:
+        raise DownloadError('符号引脚长度必须大于零')
+    position = dot[:2] if len(dot) >= 2 and all(dot[:2]) else header[4:6]
+    if len(position) != 2 or not all(position):
+        raise DownloadError('符号引脚缺少连接点坐标')
+    anchor = tuple(number(v) for v in position)
+    distances = [math.dist(anchor, point) for point in endpoints]
+    if min(distances) > 0.0001 or abs(distances[0] - distances[1]) < 1e-9:
+        raise DownloadError('符号引脚连接点与线段端点不一致')
+    return (start, end) if distances[0] < distances[1] else (end, start)
+
+
 def symbol_item(shape, c, check):
     f = shape.split('~')
     kind = f[0]
@@ -129,9 +144,7 @@ def symbol_item(shape, c, check):
         paths = path_points(line[0], check_cancelled=check)
         if len(paths) != 1 or len(paths[0]) != 2:
             raise DownloadError('符号引脚必须是一条直线')
-        external, body = paths[0]
-        if external == body:
-            raise DownloadError('符号引脚长度必须大于零')
+        external, body = pin_endpoints(header, groups[1], paths[0])
         return Pin(number=designator[4] if len(designator) > 4 else header[3], name=label[4],
                    connection=c.point(*external), body=c.point(*body),
                    electrical={'': 'unspecified', '0': 'unspecified', '1': 'input', '2': 'output',

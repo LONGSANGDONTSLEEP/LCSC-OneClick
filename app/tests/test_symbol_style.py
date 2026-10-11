@@ -117,6 +117,7 @@ class SymbolLibraryStyleTests(unittest.TestCase):
                 with self.subTest(direction=(dx, dy), length=length):
                     source = copy.deepcopy(data)
                     groups = source['dataStr']['shape'][index].split('^^')
+                    groups[1] = f'{400 + dx * length}~{300 + dy * length}'
                     path = groups[2].split('~')
                     path[0] = f'M {400 + dx * length} {300 + dy * length} L 400 300'
                     groups[2] = '~'.join(path)

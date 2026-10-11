@@ -19,17 +19,19 @@
 
 LCSC3D 是面向硬件开发、PCB 设计和结构配合的 Windows 便携工具。它把商城选型、账号收藏、模型下载、AD / KiCad 元件库导出和四类预览放在一起。下载 `LCSC3D.exe` 即可运行，无须安装 Python；导出 AD 库也无须在电脑上安装 Altium Designer。
 
-**当前开发版本：2.3.0-demo.2（本地功能预览）** · **[下载已发布 Windows 程序](https://github.com/Travelerrrrrr/LCSC3D/releases/latest/download/LCSC3D.exe)** · [完整源码包](https://github.com/Travelerrrrrr/LCSC3D/releases/latest/download/LCSC3D.zip) · [使用说明](app/README.md) · [本版更新](docs/releases/v2.3.0-demo.2.md) · [问题反馈](https://github.com/Travelerrrrrr/LCSC3D/issues)
+**当前开发版本：2.3.0-demo.3（本地功能预览）** · **[下载已发布 Windows 程序](https://github.com/Travelerrrrrr/LCSC3D/releases/latest/download/LCSC3D.exe)** · [完整源码包](https://github.com/Travelerrrrrr/LCSC3D/releases/latest/download/LCSC3D.zip) · [使用说明](app/README.md) · [本版更新](docs/releases/v2.3.0-demo.3.md) · [问题反馈](https://github.com/Travelerrrrrr/LCSC3D/issues)
 
 **追加导出支持自选目录、库名和直接导入工程。** 2.2.2 可分别配置工程的 3D、SchLib、PcbLib 输出，单独设置器件导出目录，并在追加配置页点击按钮导入指定库。本地成品入口为 `outputs/LCSC3D.exe`；下载链接仍指向已公开版本。
 
 ![LCSC3D 2.2.1：一体化浅色工作台与官方 Type-C 3D 模型](docs/images/2.2.1-release/main.png)
 
-## 2.3.0-demo.2：KiCad 导出
+## 2.3.0-demo.3：引脚方向、布局与 KiCad 合并
 
-通过“导出到”选择 AD 或 KiCad，分别显示对应配置。KiCad 8+ 符号与封装可独立导出或分别合并，共享封装自动复用；引脚类型默认跟随源数据，可统一覆盖，无法映射时使用“未指定”。矩形采用实心主体背景填充，符号预览固定为 KiCad 风格。官方 JSON 统一转换为可版本化的 EDA 中间层，保留源图元并显式检查目标能力，便于后续增加其他 EDA 适配。
+本版修复 C5879483 等符号的反向引脚路径，AD/KiCad 实际导出和预览同步纠正；修复长结果文字与表格重叠、底部控制栏间距。KiCad 合并操作与 AD 对齐，符号和封装分别命名、分别保留独立器件，3D 目录规则一致；KiCad 没有追加模式。
 
-首版新建库，不覆盖同名目标；暂不支持 KiCad 已有库追加、工程自动注册和 3D 自动绑定。已用 KiCad 8.0.9 / 9.0.9 / 10.0.7 验证。参见 [使用方法](app/README.md#kicad-导出第一版) 与 [IR 架构](docs/EDA中间层.md)。本地最新入口是 `outputs/LCSC3D.exe`，线上下载链接仍指向已发布版本。
+通过“导出到”选择 AD 或 KiCad，分别显示对应配置。KiCad 8+ 符号与封装可独立导出或分别合并，共享封装自动复用；引脚类型默认跟随源数据，可统一覆盖，无法映射时使用“未指定”。矩形采用直角和实心主体背景填充，符号预览固定为 KiCad 风格。官方 JSON 统一转换为可版本化的 EDA 中间层，保留源图元并显式检查目标能力，便于后续增加其他 EDA 适配。
+
+同名库按本次选择整体覆盖；暂不支持 KiCad 已有库追加、工程自动注册和 3D 自动绑定。已用 KiCad 8.0.9 / 9.0.9 / 10.0.7 验证。参见 [使用方法](app/README.md#kicad-导出第一版) 与 [IR 架构](docs/EDA中间层.md)。本地最新入口是 `outputs/LCSC3D.exe`，线上下载链接仍指向已发布版本。
 
 ## 2.2.2 更新重点
 
@@ -303,6 +305,8 @@ LCSC3D 是面向硬件开发、PCB 设计和结构配合的 Windows 便携工具
 下载及预览需要联网，3D 预览需要支持 WebGL 的显卡驱动。软件优先使用国内官方接口，失败时尝试官方镜像，并通过连接复用和受控并发处理批量任务。停止操作会在当前网络读取结束后响应。
 
 部分元件没有关联的 3D 模型，仍可能有可用的符号与封装；某些模型格式也可能不可获取。导出结果以实际官方资源和软件提示为准。预览用于选型和检查，生产设计前仍需根据器件数据手册核对引脚、尺寸和封装。
+
+2.3.0-demo.3 通过 **550 项本地回归测试**，覆盖引脚方向、重复合并、失败恢复、独立副本、布局和既有功能；KiCad 8/9/10 原生验证覆盖 30 个器件、662 个引脚。范围与成品验证见 [本版验证记录](docs/2.3.0-demo.3验证记录.md)。
 
 2.2.2 通过 **456 项本地回归测试**，覆盖一体化窗口、主题与语言切换、备份与恢复、商城、导出和更新；另验证自定义工程输出、独立器件目录、库名、按钮直接导入、旧设置迁移及文件选择页图标和导航。实际 EXE 的导出自检包含 **17 个完整界面流程**，并执行 Material 界面、设置与日志验证。范围和结果见 [2.2.2 验证记录](docs/2.2.2验证记录.md)。
 

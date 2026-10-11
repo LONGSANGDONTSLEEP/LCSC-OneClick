@@ -116,15 +116,7 @@ def contours(item, check):
         pos, size = item.points[0], item.size
         if min(size.x, size.y) <= 0:
             raise DownloadError('KiCad 矩形尺寸无效')
-        if item.radius.x > 0 and item.radius.y > 0:
-            rx, ry = min(item.radius.x, size.x / 2), min(item.radius.y, size.y / 2)
-            # Four analytic quarter arcs; flatten only in this target adapter.
-            x, y, w, h = pos.x, pos.y, size.x, size.y
-            path = (f'M {x+rx} {y} H {x+w-rx} A {rx} {ry} 0 0 1 {x+w} {y+ry} '
-                    f'V {y+h-ry} A {rx} {ry} 0 0 1 {x+w-rx} {y+h} '
-                    f'H {x+rx} A {rx} {ry} 0 0 1 {x} {y+h-ry} '
-                    f'V {y+ry} A {rx} {ry} 0 0 1 {x+rx} {y} Z')
-            return contours(Graphic('path', path=path), check)
+        # Rectangles use square corners in this target; keep source radii in IR.
         return [[pos, Point(pos.x + size.x, pos.y), Point(pos.x + size.x, pos.y + size.y),
                  Point(pos.x, pos.y + size.y), pos]]
     if item.kind == 'ellipse':
@@ -157,7 +149,7 @@ def symbol_graphic(item, check):
             raise DownloadError('KiCad 符号填充颜色无效') from exc
     if item.kind == 'ellipse' and item.radius.x == item.radius.y:
         return [f'(circle (center {p(item.points[0])}) (radius {n(item.radius.x)}) {stroke} (fill (type {fill})))']
-    if item.kind == 'rect' and not item.radius.x and not item.radius.y:
+    if item.kind == 'rect':
         start = item.points[0]
         end = Point(start.x + item.size.x, start.y + item.size.y)
         return [f'(rectangle (start {p(start)}) (end {p(end)}) {stroke} (fill (type {fill})))']
@@ -385,8 +377,7 @@ def conversion_warnings(component, formats):
         items += [i for u in component.symbol.units for i in u.items]
     if 'KICAD_FOOTPRINT' in formats and component.footprint:
         items += list(component.footprint.items)
-    if any(isinstance(i, Graphic) and (i.kind == 'path' or i.kind == 'ellipse' and i.radius.x != i.radius.y
-                                     or i.kind == 'rect' and i.radius.x and i.radius.y) for i in items):
+    if any(isinstance(i, Graphic) and (i.kind == 'path' or i.kind == 'ellipse' and i.radius.x != i.radius.y) for i in items):
         messages.append('曲线按 0.00127 mm 公差离散')
     return tuple(messages)
 
@@ -413,10 +404,10 @@ class Artifact:
 
 
 def build_library(components, requested, name, check=lambda: None, *, electrical_policy='source',
-                  symbol_libraries=None, footprint_libraries=None):
+                  symbol_libraries=None, footprint_libraries=None, footprint_references=None):
     """Plan names and links before producing any file; report errors per domain."""
     name = library_name(name)
-    artifacts, errors, footprint_names, used_names, known = [], {}, {}, set(), {}
+    artifacts, errors, footprint_names, used_names, known = [], {}, dict(footprint_references or {}), set(), {}
     symbol_libraries = symbol_libraries or {c.part: name for c in components}
     footprint_libraries = footprint_libraries or {c.part: name for c in components}
     for component in components:

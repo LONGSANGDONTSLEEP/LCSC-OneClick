@@ -397,6 +397,10 @@ class Options:
     kicad_merge_symbols: bool | None = None
     kicad_merge_footprints: bool | None = None
     kicad_electrical_policy: str = 'source'
+    kicad_symbol_name: str = ''
+    kicad_footprint_name: str = ''
+    keep_kicad_symbols: bool = False
+    keep_kicad_footprints: bool = False
 
     def __post_init__(self):
         self.symbol_style = normalize_symbol_style(self.symbol_style)
@@ -407,8 +411,10 @@ class Options:
             self.kicad_merge_footprints = self.kicad_merge
         if any(fmt in KICAD_FORMATS for fmt in self.formats):
             if self.append_mode:
-                raise DownloadError('KiCad 首版支持新建库，请关闭 AD 追加模式')
-            kicad_library_name(self.kicad_library_name)
+                raise DownloadError('KiCad 不支持追加已有库，请关闭 AD 追加模式')
+            for fmt, name in self.kicad_names().items():
+                if fmt in self.formats:
+                    kicad_library_name(name)
         if self.append_mode:
             targets = self.existing_targets()
             if targets:
@@ -420,6 +426,14 @@ class Options:
     def existing_targets(self):
         return {fmt: Path(path).expanduser().resolve()
                 for fmt, path in (('SCHLIB', self.schlib_target), ('PCBLIB', self.pcblib_target)) if path}
+
+    def kicad_names(self):
+        names = {'KICAD_SYMBOL': self.kicad_symbol_name or self.kicad_library_name,
+                 'KICAD_FOOTPRINT': self.kicad_footprint_name or self.kicad_library_name}
+        for fmt, suffix in (('KICAD_SYMBOL', '.kicad_sym'), ('KICAD_FOOTPRINT', '.pretty')):
+            if names[fmt].lower().endswith(suffix):
+                names[fmt] = names[fmt][:-len(suffix)]
+        return names
 
     def output_root(self):
         if self.append_mode:
@@ -468,6 +482,11 @@ class Options:
         if paths and not any(self.keeps_individual(fmt) for fmt in paths):
             library = paths.get('SCHLIB') or paths['PCBLIB']
             return library.with_name(library.stem + '_3D')
+        combined = [(fmt, keep) for fmt, merge, keep in (
+            ('KICAD_SYMBOL', self.kicad_merge_symbols, self.keep_kicad_symbols),
+            ('KICAD_FOOTPRINT', self.kicad_merge_footprints, self.keep_kicad_footprints)) if merge and fmt in self.formats]
+        if combined and not any(keep for _, keep in combined):
+            return self.destination / (self.kicad_names()[combined[0][0]] + '_3D')
         return component_folder
 
     def imports_project(self):
@@ -475,7 +494,8 @@ class Options:
                                            or self.import_existing_to_project))
 
     def appends_to(self, fmt, path):
-        # A project-only export reuses its named libraries on subsequent downloads.
+        # Explicit existing-library targets also express append intent in the
+        # legacy API. Normal merge paths never imply an append.
         return fmt in self.existing_targets() or self.append_mode and path.exists()
 
 

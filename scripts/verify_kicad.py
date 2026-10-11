@@ -60,7 +60,7 @@ def main():
     fixtures = ROOT / 'app/tests/fixtures'
     cases = json.loads(gzip.decompress((fixtures / 'official_ad_cases.json.gz').read_bytes()))['cases']
     cases += [{'part': p, 'data': json.loads((fixtures / (p + '.json')).read_text('utf-8'))}
-              for p in ('C23922', 'C8734')]
+              for p in ('C23922', 'C8734', 'C5879483')]
     components = [parse_component(c['data'], c['part']) for c in cases]
     by_part = {c.part: c for c in components}
     artifacts, errors = build_library(components, {c.part: FORMATS for c in components}, 'LCSC3D_Test')
@@ -112,6 +112,13 @@ def main():
             unit_number = int(unit[1].rsplit('_', 2)[1])
             for pin in children(unit, 'pin'):
                 source = source_pins[(unit_number, child(pin, 'number')[1])]
+                at = child(pin, 'at')
+                length = float(child(pin, 'length')[1])
+                angle = math.radians(float(at[3]))
+                assert math.isclose(float(at[1]), float(source.connection.x), abs_tol=0.000001)
+                assert math.isclose(float(at[2]), float(source.connection.y), abs_tol=0.000001)
+                assert math.isclose(float(at[1])+math.cos(angle)*length, float(source.body.x), abs_tol=0.000001)
+                assert math.isclose(float(at[2])+math.sin(angle)*length, float(source.body.y), abs_tol=0.000001)
                 assert pin[1] == pin_electrical_type(source.electrical), (component.part, source.number, pin[1])
                 for label, globally_hidden, expected_visible in (
                         ('name', names_hidden, source.name_visible), ('number', numbers_hidden, source.number_visible)):
@@ -121,6 +128,8 @@ def main():
                 assert child(pin, 'name')[1] == source.name
             for rectangle in children(unit, 'rectangle'):
                 assert child(child(rectangle, 'fill'), 'type')[1] == 'background'
+            source_unit = next(u for u in component.symbol.units if u.number == unit_number)
+            assert len(children(unit, 'rectangle')) == sum(getattr(i,'kind','') == 'rect' for i in source_unit.items)
         ref = properties['Footprint']
         assert ref.startswith('LCSC3D_Test:') and (out / 'LCSC3D_Test.pretty' / (ref.split(':', 1)[1] + '.kicad_mod')).is_file()
     assert actual_pin_counts == expected_pin_counts
@@ -135,7 +144,8 @@ def main():
     report = dict(success=True, version=version, components=len(components), symbol_units=units,
                   footprints=len(manifest), pins=sum(actual_pin_counts.values()), native_geometry=geometry,
                   pin_label_visibility_verified=True, electrical_types_verified=True,
-                  rectangle_background_fill_verified=True, no_user_profile=True)
+                  rectangle_background_fill_verified=True, square_rectangles_verified=True,
+                  pin_connections_and_directions_verified=True, no_user_profile=True)
     (out / 'verification.json').write_text(json.dumps(report, ensure_ascii=False, indent=2), 'utf-8')
     print(json.dumps(report, ensure_ascii=False))
 

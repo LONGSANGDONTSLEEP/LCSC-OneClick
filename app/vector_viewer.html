@@ -57,9 +57,10 @@ html, body { margin:0; width:100%; height:100%; overflow:hidden; }
     if (labels.childElementCount) svg.appendChild(labels);
   }
   function extendSymbolPins(preset) {
+    if (!(preset.minPinLength > 0)) return;
     for (const pin of svg.querySelectorAll('g[c_partid="part_pin"]')) {
-      // Official pin artwork starts with its straight shaft, from the
-      // connection hotspot toward the body. Edge symbols remain at the body.
+      // The shaft may be drawn in either direction. Match its electrical dot
+      // before extending, keeping the body and its edge symbols fixed.
       const shaft = [...pin.children].find(node => node.localName === 'path');
       if (!shaft) continue;
       const total = shaft.getTotalLength();
@@ -69,16 +70,30 @@ html, body { margin:0; width:100%; height:100%; overflow:hidden; }
       const rootMatrix = svg.getCTM(), shaftMatrix = shaft.getCTM();
       if (!rootMatrix || !shaftMatrix) continue;
       const toRoot = rootMatrix.inverse().multiply(shaftMatrix);
-      const outer = new DOMPoint(start.x, start.y).matrixTransform(toRoot);
-      const body = new DOMPoint(end.x, end.y).matrixTransform(toRoot);
+      const a = new DOMPoint(start.x, start.y).matrixTransform(toRoot);
+      const b = new DOMPoint(end.x, end.y).matrixTransform(toRoot);
+      const dot = pin.querySelector('circle[c_pindot]');
+      let anchor = null;
+      if (dot && dot.getCTM() && dot.hasAttribute('cx') && dot.hasAttribute('cy')) {
+        anchor = new DOMPoint(dot.cx.baseVal.value, dot.cy.baseVal.value)
+          .matrixTransform(rootMatrix.inverse().multiply(dot.getCTM()));
+      } else if (pin.hasAttribute('c_origin') && pin.getCTM()) {
+        const origin = pin.getAttribute('c_origin').split(',').map(Number);
+        if (origin.length === 2 && origin.every(Number.isFinite))
+          anchor = new DOMPoint(...origin).matrixTransform(rootMatrix.inverse().multiply(pin.getCTM()));
+      }
+      if (!anchor) continue;
+      const da = Math.hypot(anchor.x-a.x, anchor.y-a.y), db = Math.hypot(anchor.x-b.x, anchor.y-b.y);
+      if (Math.min(da, db) > 0.001 || Math.abs(da-db) < 0.000001) continue;
+      const outer = da < db ? a : b, body = da < db ? b : a;
+      const bodyLocal = da < db ? end : start;
       const length = Math.hypot(outer.x - body.x, outer.y - body.y);
       if (!length || length >= preset.minPinLength - 0.0001) continue;
       const factor = preset.minPinLength / length - 1;
       const dx = (outer.x - body.x) * factor, dy = (outer.y - body.y) * factor;
       const extended = new DOMPoint(outer.x + dx, outer.y + dy);
       const local = extended.matrixTransform(toRoot.inverse());
-      shaft.setAttribute('d', `M ${local.x} ${local.y} L ${end.x} ${end.y}`);
-      const dot = pin.querySelector('circle[c_pindot]');
+      shaft.setAttribute('d', `M ${local.x} ${local.y} L ${bodyLocal.x} ${bodyLocal.y}`);
       if (dot && dot.getCTM()) {
         const point = extended.matrixTransform(dot.getCTM().inverse().multiply(svg.getCTM()));
         dot.setAttribute('cx', point.x); dot.setAttribute('cy', point.y);

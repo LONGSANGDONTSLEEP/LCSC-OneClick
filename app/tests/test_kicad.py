@@ -197,6 +197,31 @@ class KiCadTests(unittest.TestCase):
             self.assertEqual([p[1] for p in actual], expected)
         self.assertEqual(dumps(component), before)
 
+    def test_separate_library_names_retained_copies_and_model_layout_match_merge_choices(self):
+        for keep_symbols, keep_footprints in ((False,False),(True,False),(False,True),(True,True)):
+            root = self.root / f'copies-{keep_symbols}-{keep_footprints}'
+            options = backend.Options(root, FORMATS + ('STEP',), kicad_merge=True,
+                kicad_symbol_name='Symbols.kicad_sym', kicad_footprint_name='Pads.pretty',
+                keep_kicad_symbols=keep_symbols, keep_kicad_footprints=keep_footprints)
+            rows = backend.download_batch(['C23922','C8734'], options, api=self.api)
+            self.assertTrue(all(r.status == '成功' for r in rows), [r.message for r in rows])
+            self.assertTrue((root/'Symbols.kicad_sym').is_file())
+            self.assertTrue((root/'Pads.pretty').is_dir())
+            self.assertEqual(len(list(root.rglob('*.kicad_sym'))), 3 if keep_symbols else 1)
+            self.assertEqual(len(list(root.rglob('*.pretty'))), 3 if keep_footprints else 1)
+            for path in root.rglob('*.kicad_sym'):
+                for symbol in children(sexpr(path.read_bytes()), 'symbol'):
+                    props = {p[1]:p[2] for p in children(symbol, 'property')}
+                    library, name = props['Footprint'].split(':')
+                    expected = 'Pads_' + props['SupplierPart'] if path.parent != root and keep_footprints else 'Pads'
+                    self.assertEqual(library, expected)
+                    self.assertEqual(len(list(root.rglob(library+'.pretty/'+name+'.kicad_mod'))), 1)
+            self.assertEqual((root/'Symbols_3D').exists(), not (keep_symbols or keep_footprints))
+            self.assertEqual(len(list(root.rglob('*.step'))), 2)
+            for row in rows:
+                model = Path(next(path for path in row.files if path.endswith('.step')))
+                self.assertEqual(Path(row.folder), model.parent if keep_symbols or keep_footprints else root)
+
     def test_all_rectangles_are_filled_with_native_body_background(self):
         for fill in ('none', '#000000', '#ffffff'):
             for radius in (D(0), D('0.5')):
@@ -204,19 +229,50 @@ class KiCadTests(unittest.TestCase):
                 component = Component(part='C1', symbol=Symbol(units=(SymbolUnit(items=(rectangle,
                     Pin(number='1', connection=Point(D(-2), D(0)))),),)))
                 node = child(sexpr(symbol_definition(component, 'Test')), 'symbol')
-                shape = child(node, 'polyline' if radius else 'rectangle')
+                shape = child(node, 'rectangle')
+                self.assertFalse(children(node, 'polyline'))
                 self.assertEqual(child(child(shape, 'fill'), 'type')[1], 'background')
 
-    def test_existing_library_and_existing_directory_remain_untouched(self):
+    def test_repeated_merge_replaces_members_and_whole_pretty_library(self):
         root = self.root / 'outputs'
         options = backend.Options(root, FORMATS, kicad_merge=True)
-        row = backend.download_part('C20197', options, self.api)
-        before = {p: p.read_bytes() for p in root.rglob('*') if p.is_file()}
-        again = backend.download_part('C20197', options, self.api)
-        self.assertEqual(row.status, '成功')
-        self.assertEqual(again.status, '失败')
-        self.assertIn('已存在', again.message)
-        self.assertEqual(before, {p: p.read_bytes() for p in root.rglob('*') if p.is_file()})
+        rows = backend.download_batch(['C23922','C8734'], options, api=self.api)
+        self.assertTrue(all(r.status == '成功' for r in rows))
+        old = list((root/'LCSC3D.pretty').glob('*.kicad_mod'))
+        stale = root/'LCSC3D.pretty/unused/old.kicad_mod'
+        stale.parent.mkdir()
+        stale.write_bytes(b'old member')
+        unrelated = root/'Other.pretty/keep.kicad_mod'
+        unrelated.parent.mkdir()
+        unrelated.write_bytes(b'other library')
+        again = backend.download_part('C5879483', options, self.api)
+        self.assertEqual(again.status, '成功', again.message)
+        symbols = children(sexpr((root/'LCSC3D.kicad_sym').read_bytes()), 'symbol')
+        self.assertEqual(len(symbols),1)
+        self.assertEqual({p[1]:p[2] for p in children(symbols[0],'property')}['SupplierPart'], 'C5879483')
+        self.assertFalse(any(p.exists() for p in old))
+        self.assertFalse(stale.parent.exists())
+        self.assertEqual(len(list((root/'LCSC3D.pretty').iterdir())),1)
+        self.assertEqual(unrelated.read_bytes(),b'other library')
+
+    def test_failed_replacement_restores_old_symbols_footprints_and_removed_members(self):
+        original_replace = library_files.replace_file
+        for error in (OSError('disk error'),Cancelled()):
+            root = self.root/type(error).__name__
+            old = parse_component(fixture('C23922'),'C23922')
+            old_artifacts,_ = build_library([old],{old.part:FORMATS},'Parts')
+            commit_library(root,old_artifacts)
+            (root/'Parts.pretty/nested').mkdir()
+            (root/'Parts.pretty/nested/old.kicad_mod').write_bytes(b'stale member')
+            before = {p.relative_to(root):p.read_bytes() for p in root.rglob('*') if p.is_file()}
+            new = parse_component(fixture('C5879483'),'C5879483')
+            artifacts,_ = build_library([new],{new.part:FORMATS},'Parts')
+            def fail_symbol(source,target):
+                if target.suffix == '.kicad_sym': raise error
+                original_replace(source,target)
+            with patch('library_files.replace_file',side_effect=fail_symbol), self.assertRaises(type(error)):
+                commit_library(root,artifacts,overwrite=True)
+            self.assertEqual(before,{p.relative_to(root):p.read_bytes() for p in root.rglob('*') if p.is_file()})
 
     def test_bad_domain_is_partial_success_without_blocking_other_exports(self):
         data = fixture()

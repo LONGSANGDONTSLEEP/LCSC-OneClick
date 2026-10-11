@@ -121,6 +121,32 @@ class MaterialUiTests(unittest.TestCase):
         d.cancel_button.click()
         self.assertEqual(w.preferences, Preferences())
 
+    def test_wrapped_result_details_and_export_controls_never_overlap(self):
+        w = self.window
+        with patch.object(w, 'request_component_info'), patch.object(w, 'show_preview'):
+            w.input.setPlainText('\n'.join(f'C{i}' for i in range(12)))
+            w.load_queue()
+        message = 'C5879483 · 已合并 PCBLIB → lcsc3d_v2_3_0_hb.PcbLib（12 个元件），已复用 2 个相同 footprint；已合并 SCHLIB → lcsc3d_v2_3_0_hb.SchLib（12 个元件）'
+        def top(widget):
+            return widget.mapTo(w, QPoint(0,0)).y()
+        for language, font, width, height in (('zh_CN',13,1380,880),('zh_CN',18,1060,740),('en_US',24,1060,740)):
+            w.apply_preferences(Preferences(language=language,font_size=font))
+            w.resize(width,height)
+            w.schlib_box.setChecked(True)
+            w.pcblib_box.setChecked(True)
+            w.lib_merge_box.setChecked(True)
+            for text, sizes in ((message,[560,590]), (message*3,[350,800]), ('Ready',[700,450])):
+                w.detail.setText(text)
+                w.workspace_splitter.setSizes(sizes)
+                QTest.qWait(80)
+                self.assertGreaterEqual(top(w.detail),top(w.table)+w.table.height()+8)
+                self.assertGreaterEqual(w.detail.height(),w.detail.heightForWidth(w.detail.width()))
+                self.assertGreaterEqual(top(w.export_card),top(w.workspace_splitter)+w.workspace_splitter.height()+12)
+                self.assertGreaterEqual(w.workspace_splitter.widget(0).height(),w.workspace_splitter.widget(0).layout().minimumHeightForWidth(w.workspace_splitter.widget(0).width()))
+            w.lib_merge_box.setChecked(False)
+            QTest.qWait(80)
+            self.assertGreaterEqual(top(w.export_card),top(w.workspace_splitter)+w.workspace_splitter.height()+12)
+
 
 if __name__ == '__main__':
     unittest.main()

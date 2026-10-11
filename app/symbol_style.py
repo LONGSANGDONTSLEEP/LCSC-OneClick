@@ -58,7 +58,7 @@ class SymbolStyle:
 
 AD_STYLE = SymbolStyle()
 KICAD_STYLE = SymbolStyle(outline='#840000', pin='#840000', text='#008484', area='#ffffc2',
-    font='sans-serif', rectangle_transparent=False, square_rectangles=False, min_pin_length=0,
+    font='sans-serif', rectangle_transparent=False, square_rectangles=True, min_pin_length=0,
     pin_number_text='#840000', max_pin_text=5, preserve_stroke_width=True)
 
 

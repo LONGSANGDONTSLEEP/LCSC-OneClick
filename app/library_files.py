@@ -1,12 +1,14 @@
-"""Commit a new library file set, preserving every pre-existing user file."""
+"""Publish library files with exclusive creation or recoverable set replacement."""
 from __future__ import annotations
 
 import ctypes
+import hashlib
 import os
 from pathlib import Path
+import shutil
 import tempfile
 
-from app_paths import temporary_directory
+from app_paths import temporary_directory, replace_file
 from errors import DownloadError
 
 
@@ -25,13 +27,15 @@ def _move_new(source, target):
         source.unlink()
 
 
-def commit_library(root, artifacts, check_cancelled=lambda: None):
+def commit_library(root, artifacts, check_cancelled=lambda: None, *, overwrite=False):
     """Stage under app data, publish footprints first and symbols last.
 
-    This v1 operation creates new libraries only. A collision is an error.
-    Failed/cancelled commits remove only files this operation created and whose
-    contents still match, leaving externally changed files untouched.
+    Exclusive creation is the default for callers that require collision errors.
+    The exporter passes overwrite=True to replace each named library as a set.
+    Failure/cancellation restores prior contents, preserving external edits.
     """
+    if overwrite:
+        return _replace_libraries(root, artifacts, check_cancelled)
     root = Path(root).resolve()
     paths = [(artifact, (root / artifact.path).resolve()) for artifact in artifacts]
     if len({str(path).casefold() for _, path in paths}) != len(paths):
@@ -90,3 +94,144 @@ def commit_library(root, artifacts, check_cancelled=lambda: None):
                     pass
             raise
     return [(artifact, str(target)) for artifact, target in committed]
+
+
+def _replace_libraries(root, artifacts, check):
+    """Replace each selected library as a set; restore old contents on failure.
+
+    Only the named symbol files and .pretty directories participate. Staging and
+    rollback copies stay in app data, including across different disk volumes.
+    """
+    root = Path(root).resolve()
+    if not artifacts:
+        return []
+
+    def checked(path):
+        resolved = path.resolve()
+        if resolved == root or not resolved.is_relative_to(root):
+            raise DownloadError('元件库输出路径越界')
+        for item in (path, *path.parents):
+            if item == root:
+                break
+            if item.is_symlink() or item.is_junction():
+                raise DownloadError('元件库路径包含链接，无法安全整体替换：' + str(item))
+        return resolved
+
+    paths = [(a, checked(root / a.path)) for a in artifacts]
+    if len({str(path).casefold() for _, path in paths}) != len(paths):
+        raise DownloadError('元件库输出路径冲突')
+    pretty = {p.parent for a,p in paths if a.format == 'KICAD_FOOTPRINT'}
+    if any(p == root or p.suffix.lower() != '.pretty' for p in pretty):
+        raise DownloadError('KiCad 封装库目录无效')
+    old_files, old_dirs = set(), set()
+    for directory in pretty:
+        checked(directory)
+        if not directory.exists():
+            continue
+        if not directory.is_dir():
+            raise DownloadError('KiCad 封装库路径不是目录：' + str(directory))
+        for base, dirs, files in os.walk(directory, followlinks=False):
+            old_dirs.add(checked(Path(base)))
+            for name in dirs:
+                checked(Path(base)/name)
+            for name in files:
+                old_files.add(checked(Path(base)/name))
+    for a,path in paths:
+        if a.format == 'KICAD_SYMBOL' and path.exists():
+            if not path.is_file():
+                raise DownloadError('KiCad 符号库路径不是文件：' + str(path))
+            old_files.add(path)
+
+    def digest(path):
+        with path.open('rb') as stream:
+            return hashlib.file_digest(stream, 'sha256').hexdigest()
+
+    base = Path(temporary_directory()).resolve()
+    staging = Path(tempfile.mkdtemp(prefix='library-replace-', dir=base)).resolve()
+    preserve_recovery = False
+    try:
+        commit_library(staging/'new', artifacts, check)
+        before = {}
+        for path in sorted(old_files):
+            check()
+            backup = staging/'before'/path.relative_to(root)
+            backup.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(path, backup)
+            before[path] = (backup, digest(backup))
+        journal, made_dirs, removed_dirs = [], [], []
+        def parents(path):
+            missing = []
+            parent = path.parent
+            while parent != root and not parent.exists():
+                missing.append(parent)
+                parent = parent.parent
+            root.mkdir(parents=True, exist_ok=True)
+            for directory in reversed(missing):
+                checked(directory).mkdir()
+                made_dirs.append(directory)
+        def unchanged(path):
+            checked(path)
+            if path in before and (not path.is_file() or digest(path) != before[path][1]):
+                raise DownloadError('元件库在导出期间发生变化，已停止覆盖：' + str(path))
+        try:
+            def publish(artifact, path):
+                check()
+                unchanged(path)
+                parents(path)
+                source = staging/'new'/artifact.path
+                (replace_file if path in before else _move_new)(source, path)
+                journal.append((path, hashlib.sha256(artifact.payload).hexdigest()))
+            for artifact,path in paths:
+                if artifact.format == 'KICAD_FOOTPRINT':
+                    publish(artifact, path)
+            selected = {path for _,path in paths}
+            for path in sorted(old_files - selected):
+                check()
+                unchanged(path)
+                path.unlink()
+                journal.append((path, None))
+            for artifact,path in paths:
+                if artifact.format != 'KICAD_FOOTPRINT':
+                    publish(artifact, path)
+            wanted_dirs = {parent for _,path in paths for parent in path.parents if parent.is_relative_to(root)}
+            for directory in sorted(old_dirs - wanted_dirs, key=lambda p:len(p.parts), reverse=True):
+                checked(directory).rmdir()
+                removed_dirs.append(directory)
+            check()
+        except BaseException as exc:
+            failures = []
+            for path,written_hash in reversed(journal):
+                try:
+                    checked(path)
+                    if (written_hash is None and path.exists()) or (written_hash is not None and
+                            (not path.is_file() or digest(path) != written_hash)):
+                        raise OSError('文件在回滚前发生变化')
+                    if path in before:
+                        path.parent.mkdir(parents=True, exist_ok=True)
+                        restore = staging/'restore'
+                        shutil.copy2(before[path][0], restore)
+                        (replace_file if path.exists() else _move_new)(restore, path)
+                    else:
+                        path.unlink()
+                except Exception:
+                    failures.append(str(path))
+            for directory in sorted(removed_dirs, key=lambda p:len(p.parts)):
+                try:
+                    checked(directory).mkdir(parents=True, exist_ok=True)
+                except Exception:
+                    failures.append(str(directory))
+            for directory in reversed(made_dirs):
+                try:
+                    checked(directory).rmdir()
+                except Exception:
+                    pass
+            if failures:
+                preserve_recovery = True
+                raise DownloadError('导出失败，部分文件无法回滚；原库备份保留在：' + str(staging/'before')) from exc
+            raise
+    finally:
+        # Delete only this operation's verified, application-owned staging tree.
+        if (not preserve_recovery and staging.resolve().parent == base and staging.name.startswith('library-replace-')
+                and not staging.is_symlink() and not staging.is_junction()):
+            shutil.rmtree(staging)
+    return [(artifact,str(path)) for artifact,path in paths]

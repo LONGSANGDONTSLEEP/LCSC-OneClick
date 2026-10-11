@@ -13,7 +13,7 @@ from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QThread, QTimer, QUrl, Signal
+from PySide6.QtCore import Qt, QThread, QTimer, QUrl, Signal, QEvent
 from PySide6.QtGui import QColor, QDesktopServices, QFont, QIcon, QPixmap
 from PySide6.QtWidgets import (QApplication, QButtonGroup, QFrame, QHBoxLayout, QHeaderView, QProgressBar, QScrollArea, QSizePolicy, QSplitter, QStackedWidget, QVBoxLayout, QWidget, QAbstractItemView)
 from localized_widgets import (QCheckBox, QComboBox, QLabel, QLineEdit, QPlainTextEdit, QPushButton, QTableWidget, QTableWidgetItem)
@@ -46,7 +46,7 @@ from branding import BrandLogo
 from international_store import storefront_url
 from app_paths import data_directory, configure_runtime_paths, updates_directory
 
-VERSION = '2.3.0-demo.2'
+VERSION = '2.3.0-demo.3'
 DOWNLOAD_COLUMN, PART_COLUMN, MODEL_COLUMN, RESULT_COLUMN = range(4)
 ROOT = Path(getattr(sys, '_MEIPASS', Path(__file__).resolve().parent))
 APP_DIR = Path(sys.executable).parent if getattr(sys, 'frozen', False) else Path(__file__).resolve().parent
@@ -500,13 +500,18 @@ class MainWindow(FramelessMainWindow):
         self.kicad_footprint_box.setToolTip(ui_text('导出 KiCad 8+ .pretty 封装库；保留焊盘和钻孔，暂不绑定 3D'))
         self.kicad_merge_symbol_box = QCheckBox(ui_text('合并符号库'))
         self.kicad_merge_footprint_box = QCheckBox(ui_text('合并封装库'))
-        self.kicad_name_input = QLineEdit('LCSC3D')
-        self.kicad_name_input.setAccessibleName(ui_text('KiCad 库名称'))
-        self.kicad_name_input.setPlaceholderText(ui_text('KiCad 库名称'))
-        self.kicad_name_input.setToolTip(ui_text('库名同时用作封装库昵称；已有同名 KiCad 库不会被覆盖'))
+        self.kicad_symbol_name_input = QLineEdit('LCSC3D')
+        self.kicad_footprint_name_input = QLineEdit('LCSC3D')
+        self.keep_kicad_symbol_box = QCheckBox(ui_text('独立导出器件'))
+        self.keep_kicad_footprint_box = QCheckBox(ui_text('独立导出器件'))
         for box in (self.kicad_symbol_box, self.kicad_footprint_box):
             kicad_row.addWidget(box)
             box.toggled.connect(self.update_merge_controls)
+        kicad_row.addSpacing(12)
+        kicad_row.addWidget(label('Lib', 'muted'))
+        self.kicad_lib_merge_box = QCheckBox(ui_text('合并'))
+        self.kicad_lib_merge_box.toggled.connect(self.change_kicad_merge_mode)
+        kicad_row.addWidget(self.kicad_lib_merge_box)
         kicad_row.addSpacing(12)
         kicad_row.addWidget(label(ui_text('引脚电气类型'), 'muted'))
         self.kicad_electrical_box = QComboBox()
@@ -518,14 +523,28 @@ class MainWindow(FramelessMainWindow):
         kicad_row.addWidget(self.kicad_electrical_box)
         kicad_row.addStretch()
         kicad_layout.addLayout(kicad_row)
-        kicad_merge_row = QHBoxLayout()
-        for box in (self.kicad_merge_symbol_box, self.kicad_merge_footprint_box):
-            kicad_merge_row.addWidget(box)
+        self.kicad_merge_options = QWidget()
+        kicad_merge_layout = QVBoxLayout(self.kicad_merge_options)
+        kicad_merge_layout.setContentsMargins(0, 0, 0, 0)
+        kicad_merge_layout.setSpacing(8)
+        for box, name, suffix, keep in (
+            (self.kicad_merge_symbol_box, self.kicad_symbol_name_input, '.kicad_sym', self.keep_kicad_symbol_box),
+            (self.kicad_merge_footprint_box, self.kicad_footprint_name_input, '.pretty', self.keep_kicad_footprint_box)):
+            row = QHBoxLayout()
+            row.addWidget(box)
+            name.setAccessibleName(ui_text('合并 ') + suffix + ui_text(' 名称'))
+            name.setPlaceholderText(ui_text('合并库名称'))
+            name.setToolTip(ui_text('同名库按本次选择整体覆盖；封装库名称同时用作 KiCad 库昵称'))
+            row.addWidget(name, 1)
+            row.addWidget(label(suffix, 'muted'))
+            row.addWidget(keep)
+            kicad_merge_layout.addLayout(row)
             box.toggled.connect(self.update_merge_controls)
         self.kicad_merge_footprint_box.setToolTip(ui_text('将本批次封装集中到一个 .pretty 目录，复用相同封装；可以只合并封装库'))
-        kicad_merge_row.addWidget(label(ui_text('库名称'), 'muted'))
-        kicad_merge_row.addWidget(self.kicad_name_input, 1)
-        kicad_layout.addLayout(kicad_merge_row)
+        kicad_hint = label(ui_text('未勾选独立导出器件时，3D 文件集中到“符号库名称_3D”文件夹；仅合并封装库时跟随其名称。'), 'muted')
+        kicad_hint.setWordWrap(True)
+        kicad_merge_layout.addWidget(kicad_hint)
+        kicad_layout.addWidget(self.kicad_merge_options)
         output_layout.addWidget(self.kicad_options)
         self.export_target_box.currentIndexChanged.connect(self.export_target_changed)
         self.merge_schlib_box = QCheckBox(ui_text('合并 .SchLib'))
@@ -759,6 +778,10 @@ class MainWindow(FramelessMainWindow):
         splitter.setChildrenCollapsible(False)
         layout.addWidget(splitter, 1)
         layout.addWidget(output_card)
+        # A splitter does not propagate its children's height-for-width needs.
+        # Reflow after captions/results wrap, column drags and format changes.
+        for widget in (left_column, preview_card, output_card):
+            widget.installEventFilter(self)
 
         footer = QHBoxLayout()
         footer.addWidget(label(ui_text('官方资源下载 · AGPL-3.0'), 'muted'))
@@ -809,8 +832,17 @@ class MainWindow(FramelessMainWindow):
         policy = settings.get('kicad_electrical_policy', 'source')
         self.kicad_electrical_box.setCurrentIndex(self.kicad_electrical_box.findData(
             policy if isinstance(policy, str) and policy in ELECTRICAL_POLICIES else 'unspecified'))
-        value = settings.get('kicad_library_name')
-        self.kicad_name_input.setText(value if isinstance(value, str) and value else 'LCSC3D')
+        for key, widget in (('kicad_symbol_name', self.kicad_symbol_name_input),
+                            ('kicad_footprint_name', self.kicad_footprint_name_input)):
+            value = settings.get(key, settings.get('kicad_library_name'))
+            widget.setText(value if isinstance(value, str) and value else 'LCSC3D')
+        self.keep_kicad_symbol_box.setChecked(settings.get('keep_kicad_symbols') is True)
+        self.keep_kicad_footprint_box.setChecked(settings.get('keep_kicad_footprints') is True)
+        self.kicad_lib_merge_box.blockSignals(True)
+        mode = settings.get('kicad_library_mode')
+        self.kicad_lib_merge_box.setChecked(mode == 'merge' if mode in ('individual', 'merge') else
+            self.kicad_merge_symbol_box.isChecked() or self.kicad_merge_footprint_box.isChecked())
+        self.kicad_lib_merge_box.blockSignals(False)
         self.merge_schlib_box.setChecked(settings.get('merge_schlib') is True)
         self.merge_pcblib_box.setChecked(settings.get('merge_pcblib') is True)
         self.keep_schlib_box.setChecked(settings.get('keep_schlib') is True)
@@ -865,11 +897,15 @@ class MainWindow(FramelessMainWindow):
                 'kicad_merge_symbols': self.kicad_merge_symbol_box.isChecked(),
                 'kicad_merge_footprints': self.kicad_merge_footprint_box.isChecked(),
                 'kicad_electrical_policy': self.kicad_electrical_box.currentData(),
-                'kicad_library_name': self.kicad_name_input.text(),
+                'kicad_symbol_name': self.kicad_symbol_name_input.text(),
+                'kicad_footprint_name': self.kicad_footprint_name_input.text(),
+                'keep_kicad_symbols': self.keep_kicad_symbol_box.isChecked(),
+                'keep_kicad_footprints': self.keep_kicad_footprint_box.isChecked(),
+                'kicad_library_mode': self.library_mode('kicad'),
                 'merge_schlib': self.merge_schlib_box.isChecked(), 'merge_pcblib': self.merge_pcblib_box.isChecked(),
                 'schlib_name': self.schlib_name_input.text(), 'pcblib_name': self.pcblib_name_input.text(),
                 'keep_schlib': self.keep_schlib_box.isChecked(), 'keep_pcblib': self.keep_pcblib_box.isChecked(),
-                'library_mode': self.library_mode(),
+                'library_mode': self.library_mode('ad'),
                 'symbol_style': self.symbol_style_box.currentData(),
                 **self.export_targets,
                 **preferences.to_mapping()})
@@ -1334,8 +1370,16 @@ class MainWindow(FramelessMainWindow):
             self.table.blockSignals(False)
         self.download_selection_changed()
 
-    def library_mode(self):
+    def library_mode(self, target=None):
+        if (target or self.export_target_box.currentData()) == 'kicad':
+            return 'merge' if self.kicad_lib_merge_box.isChecked() else 'individual'
         return 'append' if self.lib_append_box.isChecked() else 'merge' if self.lib_merge_box.isChecked() else 'individual'
+
+    def change_kicad_merge_mode(self, checked):
+        if checked and not any(box.isChecked() for box in (self.kicad_merge_symbol_box, self.kicad_merge_footprint_box)):
+            self.kicad_merge_symbol_box.setChecked(True)
+            self.kicad_merge_footprint_box.setChecked(True)
+        self.update_merge_controls()
 
     def change_library_mode(self, mode, checked):
         other = self.lib_append_box if mode == 'merge' else self.lib_merge_box
@@ -1369,12 +1413,17 @@ class MainWindow(FramelessMainWindow):
         self.kicad_options.setVisible(not ad)
         for widget in (self.kicad_symbol_box, self.kicad_footprint_box):
             widget.setEnabled(not self.batch_running and not ad)
-        has_kicad = self.kicad_symbol_box.isChecked() or self.kicad_footprint_box.isChecked()
         kicad_enabled = not self.batch_running and not ad
-        self.kicad_merge_symbol_box.setEnabled(kicad_enabled and self.kicad_symbol_box.isChecked())
-        self.kicad_merge_footprint_box.setEnabled(kicad_enabled and self.kicad_footprint_box.isChecked())
+        self.kicad_lib_merge_box.setEnabled(kicad_enabled)
+        self.kicad_merge_options.setVisible(not ad and self.kicad_lib_merge_box.isChecked())
+        for box, name, format_box, keep in (
+            (self.kicad_merge_symbol_box, self.kicad_symbol_name_input, self.kicad_symbol_box, self.keep_kicad_symbol_box),
+            (self.kicad_merge_footprint_box, self.kicad_footprint_name_input, self.kicad_footprint_box, self.keep_kicad_footprint_box)):
+            enabled = kicad_enabled and self.kicad_lib_merge_box.isChecked() and format_box.isChecked()
+            box.setEnabled(enabled)
+            name.setEnabled(enabled and box.isChecked())
+            keep.setEnabled(enabled and box.isChecked())
         self.kicad_electrical_box.setEnabled(kicad_enabled and self.kicad_symbol_box.isChecked())
-        self.kicad_name_input.setEnabled(kicad_enabled and has_kicad)
         self.merge_options.setVisible(merging)
         self.append_options.setVisible(append)
         for widget in (self.lib_merge_box, self.lib_append_box, self.append_configure_button):
@@ -1408,12 +1457,25 @@ class MainWindow(FramelessMainWindow):
         self.export_layout_timer.start(0)
 
     def adjust_export_layout(self):
-        # Reflow the canvas inside its scroll area when merge controls appear.
-        self.workspace_splitter.setMinimumHeight(0)
-        self.workspace_splitter.setMinimumHeight(self.workspace_splitter.minimumSizeHint().height())
+        def minimum_height(widget):
+            margins = widget.contentsMargins()
+            layout = widget.layout()
+            wrapped = layout.minimumHeightForWidth(widget.contentsRect().width()) if layout else -1
+            return max(widget.minimumSizeHint().height(), wrapped + margins.top() + margins.bottom())
+        height = max(minimum_height(self.workspace_splitter.widget(i)) for i in range(self.workspace_splitter.count()))
+        if self.workspace_splitter.minimumHeight() != height:
+            self.workspace_splitter.setMinimumHeight(height)
+        height = minimum_height(self.export_card)
+        if self.export_card.minimumHeight() != height:
+            self.export_card.setMinimumHeight(height)
         self.content_scroll.widget().layout().activate()
         available = self.screen().availableGeometry()
         self.setMinimumSize(min(1060, available.width()), min(740, available.height()))
+
+    def eventFilter(self, watched, event):
+        if event.type() in (QEvent.LayoutRequest, QEvent.Resize) and not self.export_layout_timer.isActive():
+            self.export_layout_timer.start(0)
+        return super().eventFilter(watched, event)
 
     def configure_export_targets(self):
         current = getattr(self, 'export_dialog', None)
@@ -1451,16 +1513,20 @@ class MainWindow(FramelessMainWindow):
         ad = self.export_target_box.currentData() == 'ad'
         merge = ad and self.lib_merge_box.isChecked()
         append = ad and self.lib_append_box.isChecked()
+        kicad_merge = not ad and self.kicad_lib_merge_box.isChecked()
         return Options(Path(self.path_input.text().strip()).expanduser().resolve(), formats,
                        merge and self.merge_schlib_box.isChecked(), merge and self.merge_pcblib_box.isChecked(),
                        self.schlib_name_input.text(), self.pcblib_name_input.text(),
                        merge and self.keep_schlib_box.isChecked(), merge and self.keep_pcblib_box.isChecked(),
                        append_mode=append,
                        symbol_style=self.symbol_style_box.currentData(),
-                       kicad_merge_symbols=self.kicad_symbol_box.isChecked() and self.kicad_merge_symbol_box.isChecked(),
-                       kicad_merge_footprints=self.kicad_footprint_box.isChecked() and self.kicad_merge_footprint_box.isChecked(),
+                       kicad_merge_symbols=kicad_merge and self.kicad_symbol_box.isChecked() and self.kicad_merge_symbol_box.isChecked(),
+                       kicad_merge_footprints=kicad_merge and self.kicad_footprint_box.isChecked() and self.kicad_merge_footprint_box.isChecked(),
                        kicad_electrical_policy=self.kicad_electrical_box.currentData(),
-                       kicad_library_name=self.kicad_name_input.text().strip(),
+                       kicad_symbol_name=self.kicad_symbol_name_input.text().strip() if kicad_merge and self.kicad_merge_symbol_box.isChecked() else '',
+                       kicad_footprint_name=self.kicad_footprint_name_input.text().strip() if kicad_merge and self.kicad_merge_footprint_box.isChecked() else '',
+                       keep_kicad_symbols=kicad_merge and self.keep_kicad_symbol_box.isChecked(),
+                       keep_kicad_footprints=kicad_merge and self.keep_kicad_footprint_box.isChecked(),
                        **(self.export_targets if append else {}))
 
     def start_batch(self):
@@ -1983,8 +2049,8 @@ class MainWindow(FramelessMainWindow):
             '默认记住登录，重启后自动恢复；取消勾选时只保留本次登录。「退出登录」可清除已保存会话。<br><br>'
             '左侧「设置」可分别选择商城与检查更新是否使用系统代理，并调整日志等级；默认 Debug。「打开日志」可打开日志目录。<br><br>'
             '可保存官方 STEP、OBJ，并导出原生 AD SchLib 符号库、PcbLib 封装库；不导出 JSON 或 SVG。<br>'
-            '「导出到」选择 AD 或 KiCad，仅显示对应配置。KiCad 的「合并符号库」「合并封装库」可独立选择；引脚类型默认跟随源数据，不支持的类型使用未指定，也可统一覆盖。矩形实心填充使用主体背景颜色。<br>'
-            'KiCad 8+：添加 .kicad_sym 和 .pretty 时，封装库昵称须与导出库名一致。已有同名文件保留；暂不支持追加、自动注册工程库或自动绑定 3D。KiCad 符号预览固定使用 KiCad 风格，切回 AD 恢复原有风格。<br>'
+            '「导出到」选择 AD 或 KiCad，仅显示对应配置。KiCad 与 AD 使用相同的合并开关、分别命名和独立器件选项，KiCad 不提供追加；引脚类型默认跟随源数据，不支持的类型使用未指定，也可统一覆盖。矩形统一直角，实心填充使用主体背景颜色。<br>'
+            'KiCad 8+：添加 .kicad_sym 和 .pretty 时，封装库昵称须与导出库名一致。同名库按本次选择整体覆盖，.pretty 中未选中的旧封装会移除；暂不支持追加、自动注册工程库或自动绑定 3D。KiCad 符号预览固定使用 KiCad 风格，切回 AD 恢复原有风格。<br>'
             'SchLib / PcbLib 可分别勾选合并并自定义库名，合并文件保存在所选目录根部；默认逐器件导出。<br>'
             'Lib「合并」「追加」互斥，勾选后显示配置。未勾选「独立导出器件」时，3D 文件集中到 SchLib 旁的“库名_3D”文件夹；仅有 PcbLib 时跟随其名称。<br>'
             '「追加」仅指定 PCB 工程时，可分别设置 3D、SchLib、PcbLib 的目录和库名；独立器件目录留空时使用工程所在文件夹。<br>在追加配置页指定已有库和工程后，点击「将指定库导入到PCB工程」直接导入，无须下载器件。<br>'

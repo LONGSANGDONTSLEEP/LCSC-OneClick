@@ -126,7 +126,8 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
                          {'destination', 'step', 'obj', 'schlib', 'pcblib', 'store_proxy', 'update_proxy', 'log_level', 'language', 'theme_mode', 'accent_color', 'accent_text_color', 'font_family', 'font_size', 'auto_backup',
                           'merge_schlib', 'merge_pcblib', 'schlib_name', 'pcblib_name',
                           'kicad_symbol', 'kicad_footprint', 'kicad_merge_symbols', 'kicad_merge_footprints',
-                          'export_target', 'kicad_electrical_policy', 'kicad_library_name',
+                          'export_target', 'kicad_electrical_policy', 'kicad_symbol_name', 'kicad_footprint_name',
+                          'kicad_library_mode', 'keep_kicad_symbols', 'keep_kicad_footprints',
                           'keep_schlib', 'keep_pcblib', 'schlib_target', 'pcblib_target', 'project_path',
                           'library_mode', 'symbol_style', 'keep_individual', 'individual_directory', 'project_model_directory',
                           'project_schlib_directory', 'project_pcblib_directory', 'project_schlib_name', 'project_pcblib_name'})
@@ -471,7 +472,7 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
             self.assertEqual(actual[1], ['rgb(0, 132, 132)', '1', '5px'])
             self.assertEqual(actual[2], ['rgb(132, 0, 0)', '1', '5px'])
             self.assertEqual(self.evaluate(self.window.symbol_view,
-                "getComputedStyle(document.getElementById('body')).rx"), '3px')
+                "getComputedStyle(document.getElementById('body')).rx"), '0px')
             self.window.export_target_box.setCurrentIndex(self.window.export_target_box.findData('ad'))
             self.wait_for_library()
             self.assertEqual(self.window.symbol_view.document.symbol_style, 'ad')
@@ -525,6 +526,47 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
             self.wait_for_library()
             self.assertEqual(self.evaluate(self.window.symbol_view, geometry), before)
             self.assertEqual(network.call_count, 1)
+
+    def test_official_reversed_resistor_pins_extend_outward_and_keep_body_ends(self):
+        api = SimpleNamespace(get_svg_data_of_component=lambda part: fixture('C5879483'), check_cancelled=lambda: None)
+        self.window.show()
+        with patch('main.NetworkApi', return_value=api):
+            self.window.preview_mode_buttons['symbol'].click()
+            self.wait_for_library()
+            self.window.symbol_style_box.setCurrentIndex(1)
+            self.wait_for_library()
+            pins = self.evaluate(self.window.symbol_view, '''[...document.querySelectorAll('g[c_partid=part_pin]')].map(pin=>{
+                const path=pin.querySelector('path'), dot=pin.querySelector('circle[c_pindot]');
+                const a=path.getPointAtLength(0), b=path.getPointAtLength(path.getTotalLength());
+                return {number:pin.getAttribute('c_spicepin'),outer:[a.x,a.y],body:[b.x,b.y],dot:[dot.cx.baseVal.value,dot.cy.baseVal.value]};})''')
+            actual = {p['number']: p for p in pins}
+            self.assertEqual(actual['1'], dict(number='1', outer=[370,300], body=[390,300], dot=[370,300]))
+            self.assertEqual(actual['2'], dict(number='2', outer=[430,300], body=[410,300], dot=[430,300]))
+
+    def test_reversed_svg_pins_use_transformed_dots_in_each_direction(self):
+        data = fixture('C20197')
+        pins = []
+        for i, (dx, dy) in enumerate(((1,0),(-1,0),(0,1),(0,-1))):
+            bx, by = 100 * i, 30
+            ex, ey = bx + dx * 10, by + dy * 10
+            pins.append(f'''<g c_partid="part_pin" c_origin="999,999" transform="translate(20,10)">
+                <circle c_pindot="true" cx="{ex}" cy="{ey}" r="2"/>
+                <path d="M {bx} {by} L {ex} {ey}" stroke="red" fill="none"/>
+                <text x="{bx}" y="{by}">Name</text><text x="{ex}" y="{ey}">N</text></g>''')
+        data['result'][0]['svg'] = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="-30 -30 450 150">'+''.join(pins)+'</svg>'
+        api = SimpleNamespace(get_svg_data_of_component=lambda part:data, check_cancelled=lambda:None)
+        self.window.show()
+        with patch('main.NetworkApi', return_value=api):
+            self.window.preview_mode_buttons['symbol'].click()
+            self.wait_for_library()
+            self.window.symbol_style_box.setCurrentIndex(1)
+            self.wait_for_library()
+            actual = self.evaluate(self.window.symbol_view, '''[...document.querySelectorAll('g[c_partid=part_pin]')].map(pin=>{
+                const path=pin.querySelector('path'),dot=pin.querySelector('circle[c_pindot]');
+                const a=path.getPointAtLength(0),b=path.getPointAtLength(path.getTotalLength());
+                return [a.x,a.y,b.x,b.y,dot.cx.baseVal.value,dot.cy.baseVal.value];})''')
+            for i,(dx,dy) in enumerate(((1,0),(-1,0),(0,1),(0,-1))):
+                self.assertEqual(actual[i], [100*i+dx*20,30+dy*20,100*i,30,100*i+dx*20,30+dy*20])
 
     def test_official_pad_css_and_pin_text_survive_browser_rendering(self):
         self.window.show()
@@ -901,7 +943,8 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
                          {'destination', 'step', 'obj', 'schlib', 'pcblib', 'store_proxy', 'update_proxy', 'log_level', 'language', 'theme_mode', 'accent_color', 'accent_text_color', 'font_family', 'font_size', 'auto_backup',
                           'merge_schlib', 'merge_pcblib', 'schlib_name', 'pcblib_name',
                           'kicad_symbol', 'kicad_footprint', 'kicad_merge_symbols', 'kicad_merge_footprints',
-                          'export_target', 'kicad_electrical_policy', 'kicad_library_name',
+                          'export_target', 'kicad_electrical_policy', 'kicad_symbol_name', 'kicad_footprint_name',
+                          'kicad_library_mode', 'keep_kicad_symbols', 'keep_kicad_footprints',
                           'keep_schlib', 'keep_pcblib', 'schlib_target', 'pcblib_target', 'project_path',
                           'library_mode', 'symbol_style', 'keep_individual', 'individual_directory', 'project_model_directory',
                           'project_schlib_directory', 'project_pcblib_directory', 'project_schlib_name', 'project_pcblib_name'})

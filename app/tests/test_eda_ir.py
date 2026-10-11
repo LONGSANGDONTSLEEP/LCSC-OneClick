@@ -76,6 +76,51 @@ class IRTests(unittest.TestCase):
         legacy = loads(json.dumps(wire))
         self.assertEqual(next(i for i in legacy.symbol.units[0].items if isinstance(i, Pin)).electrical, 'unspecified')
 
+    def test_real_reversed_paths_keep_connection_outside_body_in_ad_and_kicad(self):
+        from test_kicad import sexpr, children, child
+        component = loads(dumps(parse_component(fixture('C5879483'), 'C5879483')))
+        pins = {i.number: i for u in component.symbol.units for i in u.items if isinstance(i, Pin)}
+        self.assertEqual((pins['1'].connection.x, pins['1'].body.x), (D('-5.08'), D('-2.54')))
+        self.assertEqual((pins['2'].connection.x, pins['2'].body.x), (D('5.08'), D('2.54')))
+        for style, length in (('jlc', 10), ('ad', 20)):
+            actual = {p['number']: p for p in schematic(export_schlib(component, component.part, symbol_style=style))[2]}
+            for number, body, orientation in (('1', -10, 2), ('2', 10, 0)):
+                self.assertEqual((actual[number]['x'], actual[number]['y'], actual[number]['length'], actual[number]['flags'] & 3),
+                                 (body, 0, length, orientation))
+        artifacts, errors = build_library([component], {component.part: ('KICAD_SYMBOL',)}, 'Resistor')
+        self.assertFalse(errors)
+        actual = {child(p, 'number')[1]: p for p in children(child(child(sexpr(artifacts[0].payload), 'symbol'), 'symbol'), 'pin')}
+        self.assertEqual(child(actual['1'], 'at')[1:], ['-5.08', '0', '0'])
+        self.assertEqual(child(actual['2'], 'at')[1:], ['5.08', '0', '180'])
+
+    def test_pin_dot_selects_either_path_endpoint_in_all_four_directions(self):
+        from kicad import symbol_definition
+        from test_kicad import sexpr, child
+        for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            for reverse in (False, True):
+                data = fixture('C5879483')
+                index = next(i for i, s in enumerate(data['dataStr']['shape']) if s.startswith('P~'))
+                groups = [g.split('~') for g in data['dataStr']['shape'][index].split('^^')]
+                x, y = 400 + dx * 10, 300 + dy * 10
+                groups[0][4:6] = ['999', '888']  # Legacy origin can differ from the explicit pin dot.
+                groups[1] = [str(x), str(y)]
+                groups[2][0] = f'M 400 300 L {x} {y}' if reverse else f'M {x} {y} L 400 300'
+                data['dataStr']['shape'] = ['^^'.join('~'.join(g) for g in groups)]
+                component = parse_component(data, 'C5879483')
+                pin = require_domain(component, 'symbol').units[0].items[0]
+                self.assertEqual(pin.connection, Point(D(dx) * D('2.54'), D(-dy) * D('2.54')))
+                self.assertEqual(pin.body, Point())
+                actual = schematic(export_schlib(component, component.part, symbol_style='ad'))[2][0]
+                self.assertEqual((actual['x'], actual['y'], actual['length']), (0, 0, 20))
+                self.assertEqual(actual['flags'] & 3, {(1, 0): 0, (-1, 0): 2, (0, 1): 3, (0, -1): 1}[dx, dy])
+                kpin = child(child(sexpr(symbol_definition(component, 'Direction')), 'symbol'), 'pin')
+                self.assertEqual(int(child(kpin, 'at')[3]), {(1, 0): 180, (-1, 0): 0, (0, 1): 90, (0, -1): 270}[dx, dy])
+        groups[1] = ['405', '305']
+        data['dataStr']['shape'] = ['^^'.join('~'.join(g) for g in groups)]
+        component = parse_component(data, 'C5879483')
+        with self.assertRaisesRegex(DownloadError, '连接点与线段端点不一致'):
+            require_domain(component, 'symbol')
+
     def test_future_optional_fields_and_namespaced_extensions_are_retained(self):
         wire = json.loads(dumps(parse_component(fixture(), 'C2765186')))
         wire['schema_version'] = '1.7'
