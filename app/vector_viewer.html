@@ -71,12 +71,11 @@ html, body { margin:0; width:100%; height:100%; overflow:hidden; }
       return rgb && rgb.slice(1, 4).map(Number).reduce((a, b) => a + b, 0) / 3 >= preset.lightFillThreshold;
     };
     for (const {node, fill, stroke} of items) {
-      // The first full-canvas rect is a preview background, not a symbol body.
+      // Compare native SVG lengths to the native viewBox: both use the same
+      // float precision. Number("26.3") differs from viewBox.baseVal.height.
       if (node.parentElement === svg && node.localName === 'rect' && stroke === 'none'
-          && Number(node.getAttribute('x') || 0) === bounds.x
-          && Number(node.getAttribute('y') || 0) === bounds.y
-          && Number(node.getAttribute('width')) === bounds.width
-          && Number(node.getAttribute('height')) === bounds.height) continue;
+          && node.x.baseVal.value === bounds.x && node.y.baseVal.value === bounds.y
+          && node.width.baseVal.value === bounds.width && node.height.baseVal.value === bounds.height) continue;
       if (node.hasAttribute('c_pindot')) continue; // Editor connection hotspots.
       const pin = !!node.closest('[c_partid="part_pin"]');
       const set = (key, value) => node.style.setProperty(key, value, 'important');
@@ -87,6 +86,9 @@ html, body { margin:0; width:100%; height:100%; overflow:hidden; }
         if (fill !== 'none') set('fill', preset.text);
         if (stroke !== 'none') set('stroke', preset.text);
       } else {
+        if (node.localName === 'rect' && preset.squareRectangles) {
+          set('rx', '0'); set('ry', '0');
+        }
         if (stroke !== 'none') {
           set('stroke', pin ? preset.pin : preset.outline);
           set('stroke-width', preset.lineWidth);

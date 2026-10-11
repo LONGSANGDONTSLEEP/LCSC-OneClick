@@ -33,11 +33,11 @@ def verify(output, sandbox):
     temporary.mkdir(exist_ok=True)
     environment['TEMP'] = environment['TMP'] = str(temporary)
 
-    def run(name, flag, style):
+    def run(name, flag, style, extra=()):
         folder = sandbox / name
         folder.mkdir(exist_ok=True)
         with (folder / 'stdout.log').open('wb') as stdout, (folder / 'stderr.log').open('wb') as stderr:
-            result = subprocess.run([str(executable), flag, str(folder), '--self-test-symbol-style', style],
+            result = subprocess.run([str(executable), flag, str(folder), '--self-test-symbol-style', style, *extra],
                 cwd=sandbox, env=environment, stdout=stdout, stderr=stderr,
                 creationflags=subprocess.CREATE_NO_WINDOW, timeout=180)
         assert result.returncode == 0, (name, (folder / 'stderr.log').read_text('utf-8', errors='replace'))
@@ -55,6 +55,22 @@ def verify(output, sandbox):
         reports[style] = dict(preview=True, symbol_pins=[57, 8])
         print('PREVIEW', style, 'PASS', flush=True)
 
+    sys.path.insert(0, str(root / 'app/tests'))
+    from altium_inspect import schematic
+    for part in ('C163691', 'C2765186'):
+        folder = run('regression-' + part, '--self-test-ad', 'ad', ('--self-test-ad-parts', part))
+        report = json.loads((folder / 'verification.json').read_text('utf-8'))
+        assert report['success'] and report['preview'] == 'ready' and report['symbol_style'] == 'ad'
+        file = next(Path(f) for f in report['results'][0]['files'] if f.endswith('.SchLib'))
+        header, records, pins = schematic(file.read_bytes())
+        assert header['AREACOLOR'] == '16777215'
+        assert not any(row.get('RECORD') == '10' for row in records)
+        if part == 'C163691':
+            assert len(pins) == 2 and not any('AREACOLOR' in row for row in records)
+        else:
+            assert any(row.get('RECORD') == '14' for row in records)
+        print('REGRESSION', part, 'PASS', flush=True)
+
     folder = sandbox / 'export-ad'
     fixtures = folder / 'fixtures'
     fixtures.mkdir(parents=True, exist_ok=True)
@@ -63,8 +79,6 @@ def verify(output, sandbox):
     run('export-ad', '--self-test-export', 'ad')
     report = json.loads((folder / 'export-verification.json').read_text('utf-8'))
     assert report['frozen'] and report['success'] and len(report['cases']) == 17, report
-    sys.path.insert(0, str(root / 'app/tests'))
-    from altium_inspect import schematic
     checked = 0
     for case in report['cases']:
         files = {Path(f) for row in case.get('results', []) for f in row['files'] if f.endswith('.SchLib')}
@@ -79,6 +93,7 @@ def verify(output, sandbox):
                     continue  # Pre-existing entries retain their original appearance.
                 assert pins
                 for row in records:
+                    assert row.get('RECORD') != '10'
                     for key in ('FONTID', 'NAME_CUSTOMFONTID', 'DESIGNATOR_CUSTOMFONTID'):
                         if key in row:
                             assert header['FONTNAME' + row[key]] == 'Times New Roman'
@@ -93,7 +108,8 @@ def verify(output, sandbox):
                 checked += 1
     assert checked > 20
     assert source.read_bytes() == executable.read_bytes()
-    result = dict(success=True, styles=reports, export_cases=17, independently_read_symbols=checked)
+    result = dict(success=True, styles=reports, regression_parts=['C163691', 'C2765186'],
+                  export_cases=17, independently_read_symbols=checked)
     (sandbox / 'verification.json').write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding='utf-8')
     return result
 

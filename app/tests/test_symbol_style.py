@@ -18,14 +18,19 @@ from test_library_preview import fixture
 
 
 APPEARANCE = {'COLOR', 'AREACOLOR', 'LINEWIDTH', 'FONTID', 'NAME_CUSTOMFONTID',
-              'DESIGNATOR_CUSTOMFONTID', 'NAME_CUSTOMCOLOR', 'DESIGNATOR_CUSTOMCOLOR', 'UNIQUEID'}
+              'DESIGNATOR_CUSTOMFONTID', 'NAME_CUSTOMCOLOR', 'DESIGNATOR_CUSTOMCOLOR', 'UNIQUEID',
+              'CORNERXRADIUS', 'CORNERYRADIUS', 'CORNERXRADIUS_FRAC', 'CORNERYRADIUS_FRAC'}
 
 
 def semantics(records):
-    return [{k: v for k, v in row.items() if k not in APPEARANCE} for row in records]
+    # AD's straight rectangle replaces the rounded rectangle without moving
+    # either corner, pins or any other graphical/electrical information.
+    return [{k: '14' if k == 'RECORD' and v == '10' else v
+             for k, v in row.items() if k not in APPEARANCE} for row in records]
 
 
 def assert_ad_fonts(test, header, records):
+    test.assertFalse(any(row.get('RECORD') == '10' for row in records))
     for row in records:
         for key in ('FONTID', 'NAME_CUSTOMFONTID', 'DESIGNATOR_CUSTOMFONTID'):
             if key in row:
@@ -74,6 +79,34 @@ class SymbolStyleTests(unittest.TestCase):
 
 @unittest.skipUnless(sys.platform == 'win32', 'Native AD libraries')
 class SymbolLibraryStyleTests(unittest.TestCase):
+    def test_ad_uses_native_straight_rectangles_while_jlc_keeps_corner_radii(self):
+        data = json.loads((Path(__file__).parent / 'fixtures/C2040.json').read_text('utf-8'))
+        shapes = data['dataStr']['shape']
+        index = next(i for i, shape in enumerate(shapes) if shape.startswith('R~'))
+        fields = shapes[index].split('~')
+        fields[3:5] = ['2.5', '3.5']
+        shapes[index] = '~'.join(fields)
+        original = copy.deepcopy(data)
+        _, jlc, _ = schematic(export_schlib(data, 'C2040', symbol_style='jlc'))
+        _, ad, _ = schematic(export_schlib(data, 'C2040', symbol_style='ad'))
+        rounded = next(row for row in jlc if row.get('RECORD') == '10')
+        rectangle = next(row for row in ad if row.get('RECORD') == '14')
+        self.assertEqual(rounded['CORNERXRADIUS'], '2')
+        self.assertEqual(rounded['CORNERXRADIUS_FRAC'], '50000')
+        self.assertFalse(any(row.get('RECORD') == '10' for row in ad))
+        self.assertFalse(any(key.startswith(('CORNERXRADIUS', 'CORNERYRADIUS')) for key in rectangle))
+        self.assertEqual(semantics(jlc), semantics(ad))
+        self.assertEqual(data, original)
+
+    def test_inductor_export_has_a_white_canvas_and_no_background_fill(self):
+        data = json.loads((Path(__file__).parent / 'fixtures/C163691.json').read_text('utf-8'))
+        for style in ('jlc', 'ad'):
+            with self.subTest(style=style):
+                header, records, pins = schematic(export_schlib(data, 'C163691', symbol_style=style))
+                self.assertEqual(header['AREACOLOR'], '16777215')
+                self.assertEqual(len(pins), 2)
+                self.assertFalse(any('AREACOLOR' in row or row.get('ISSOLID') == 'T' for row in records))
+
     def test_all_official_symbols_keep_geometry_pins_units_and_parameters(self):
         samples = cases()
         for part in ('C23922', 'C8734'):

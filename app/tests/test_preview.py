@@ -316,6 +316,53 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
         self.assertEqual(self.evaluate(self.window.symbol_view,
             "getComputedStyle(document.getElementById('hidden').parentElement).display"), 'none')
 
+    def test_real_inductor_fractional_svg_background_stays_white_in_both_styles(self):
+        api = SimpleNamespace(get_svg_data_of_component=lambda part: fixture('C163691'), check_cancelled=lambda: None)
+        self.window.show()
+        self.window.input.setPlainText('C163691')
+        self.window.load_queue()
+        with patch('main.NetworkApi', return_value=api) as network:
+            self.window.preview_mode_buttons['symbol'].click()
+            self.wait_for_library()
+            for index in (0, 1, 0, 1):
+                with self.subTest(style=('jlc', 'ad')[index]):
+                    self.window.symbol_style_box.setCurrentIndex(index)
+                    self.wait_for_library()
+                    self.assertEqual(self.window.symbol_view.document.count, 2)
+                    background = self.evaluate(self.window.symbol_view,
+                        "(() => { const r=document.querySelector('#canvas svg > rect'); return [r.getAttribute('y'),r.getAttribute('height'),getComputedStyle(r).fill]; })()")
+                    self.assertEqual(background, ['285.7', '26.3', 'rgb(255, 255, 255)'])
+                    pin = self.evaluate(self.window.symbol_view,
+                        "getComputedStyle(document.querySelector('g[c_partid=part_pin] path')).stroke")
+                    self.assertEqual(pin, 'rgb(0, 0, 0)' if index else 'rgb(136, 0, 0)')
+            self.assertEqual(network.call_count, 1)
+
+    def test_ad_rectangles_have_square_corners_and_jlc_retains_svg_attributes_and_css(self):
+        data = fixture('C20197')
+        data['result'][0]['svg'] = '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="-10.7 -5.3 100.3 100.7">
+          <style>#css-rounded{rx:7px !important;ry:6px !important}</style>
+          <rect id="background" x="-10.7" y="-5.3" width="100.3" height="100.7" fill="white" stroke="none"/>
+          <g c_para="name`rounded`" c_origin="0,0">
+            <rect id="attr-rounded" x="0" y="0" width="30" height="30" rx="2.5" ry="3.5" fill="white" stroke="red"/>
+            <rect id="css-rounded" x="40" y="40" width="30" height="30" fill="white" stroke="red"/>
+          </g></svg>'''
+        api = SimpleNamespace(get_svg_data_of_component=lambda part: data, check_cancelled=lambda: None)
+        self.window.show()
+        with patch('main.NetworkApi', return_value=api) as network:
+            self.window.preview_mode_buttons['symbol'].click()
+            self.wait_for_library()
+            for index in (0, 1, 0):
+                with self.subTest(style=('jlc', 'ad')[index]):
+                    self.window.symbol_style_box.setCurrentIndex(index)
+                    self.wait_for_library()
+                    radii = self.evaluate(self.window.symbol_view,
+                        "['attr-rounded','css-rounded'].map(id=>{const s=getComputedStyle(document.getElementById(id));return [parseFloat(s.rx),parseFloat(s.ry),s.fill];})")
+                    self.assertEqual(radii, [[0, 0, 'rgb(255, 255, 176)']] * 2 if index else
+                                     [[2.5, 3.5, 'rgb(255, 255, 255)'], [7, 6, 'rgb(255, 255, 255)']])
+                    self.assertEqual(self.evaluate(self.window.symbol_view,
+                        "getComputedStyle(document.getElementById('background')).fill"), 'rgb(255, 255, 255)')
+            self.assertEqual(network.call_count, 1)
+
     def test_official_pad_css_and_pin_text_survive_browser_rendering(self):
         self.window.show()
         api = SimpleNamespace(get_svg_data_of_component=lambda part: fixture(part), check_cancelled=lambda: None)

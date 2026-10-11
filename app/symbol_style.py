@@ -1,7 +1,7 @@
 """Appearance presets shared by SchLib export and the SVG preview.
 
-Only presentation changes. Coordinates, pin identities and visibility belong
-to the source component and must never be inferred from a style preset.
+Appearance changes include square corners for AD rectangles. Bounds, pin
+identities and visibility always belong to the source component.
 """
 from dataclasses import dataclass
 import re
@@ -25,6 +25,7 @@ class SymbolStyle:
     font_size: int = 8
     line_width: int = 1  # AD Small = 10 mil = one EasyEDA schematic unit.
     light_fill_threshold: int = 192
+    square_rectangles: bool = True
 
     def fill(self, value):
         """Keep transparent shapes and solid polarity/arrow marks distinct."""
@@ -42,7 +43,8 @@ class SymbolStyle:
         # are expressed in source units, independent of browser pixel density.
         return dict(outline=self.outline, pin=self.pin, text=self.text, area=self.area,
                     font=self.font, fontSize=self.font_size / 0.72,
-                    lineWidth=self.line_width, lightFillThreshold=self.light_fill_threshold)
+                    lineWidth=self.line_width, lightFillThreshold=self.light_fill_threshold,
+                    squareRectangles=self.square_rectangles)
 
 
 AD_STYLE = SymbolStyle()

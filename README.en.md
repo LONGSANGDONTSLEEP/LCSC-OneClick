@@ -175,7 +175,7 @@ The same C456013 part is shown on the official storefront below. Symbol and foot
 
 ## Merge, append and PCB project integration
 
-The preview area includes **Symbol style: JLC / AD**. Changing the style updates the symbol preview and applies the same appearance preset to new SchLib exports. JLC is the default; AD uses dark red outlines, black pins, dark blue Times New Roman 8pt text, and pale yellow for existing light fills. Geometry, pin locations and electrical data remain intact. The selection is saved, and existing entries retain their appearance when appending to a library.
+The preview area includes **Symbol style: JLC / AD**. Changing the style updates the symbol preview and applies the same appearance preset to new SchLib exports. JLC is the default; AD uses dark red outlines, black pins, dark blue Times New Roman 8pt text, and pale yellow for existing light fills. AD converts rounded rectangles into native straight rectangles while retaining their bounds, other geometry, pin locations and electrical data. Canvas backgrounds remain white. The selection is saved, and existing entries retain their appearance when appending to a library.
 
 **Lib → Merge** and **Lib → Append** are mutually exclusive. Each mode exposes its configuration controls.
 

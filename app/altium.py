@@ -307,13 +307,13 @@ def _schlib_component(data, part, check_cancelled, *, merged=False, merge_pcb=Fa
                 rx, ry = _decimal(fields[3] or '0'), _decimal(fields[4] or '0')
                 if rx < 0 or ry < 0:
                     raise DownloadError('符号矩形圆角半径无效')
-                rounded = rx > 0 and ry > 0
+                rounded = rx > 0 and ry > 0 and not (style and style.square_rectangles)
                 record = common(10 if rounded else 14)
                 _coord_parameter(record, 'Location.X', x(fields[1]))
                 _coord_parameter(record, 'Location.Y', y(_decimal(fields[2]) + _decimal(fields[6])))
                 _coord_parameter(record, 'Corner.X', x(_decimal(fields[1]) + _decimal(fields[5])))
                 _coord_parameter(record, 'Corner.Y', y(fields[2]))
-                # Preserve rounded corners where supplied by the official shape.
+                # JLC retains source corners; AD uses a native straight rectangle.
                 if rounded:
                     _coord_parameter(record, 'CornerXRadius', rx)
                     _coord_parameter(record, 'CornerYRadius', ry)
