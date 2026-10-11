@@ -44,7 +44,9 @@ def fixture_favorites(rows, page=1, total=4, size=2):
     return {'code': 200, 'result': {'page': {'currPage': page, 'pageRow': size, 'totalRow': total,
             'totalPage': (total + size - 1)//size if size else 0,
             'dataList': [{'productCode': part, 'productModel': title, 'productId': fixture_identity(part),
-                          'brandName': 'Offline fixture', 'standard': 'LQFN-56'} for part, title in rows]}}}
+                          'brandName': 'Offline fixture', 'standard': 'LQFN-56',
+                          'breviaryImageUrl': f'https://alimg.szlcsc.com/upload/public/product/breviary/{part}/0.png'}
+                         for part, title in rows]}}}
 
 
 def fixture_identity(part):
@@ -457,6 +459,10 @@ def start(window, destination):
                 assert dialog.pages_read == 2
                 report['favorite_ids'] = list(dialog.items)
                 report['pages'] = dialog.pages_read
+                report['favorite_row_thumbnails'] = sum(
+                    not dialog.favorite_table.item(row, dialog.favorite_table.thumbnail_column).icon().isNull()
+                    for row in range(dialog.favorite_table.rowCount()))
+                assert report['favorite_row_thumbnails'] == len(dialog.items)
                 report['login_confirmed'] = True
                 assert not dialog.selected_items()
                 dialog.table.item(0, 0).setCheckState(Qt.Checked)

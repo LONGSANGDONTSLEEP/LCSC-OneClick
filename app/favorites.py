@@ -28,10 +28,11 @@ from app_logging import (log_event, new_context, log_context, contextual, record
 THUMBNAIL_COLUMN = 7
 
 
-class SearchTable(QTableWidget):
+class ProductTable(QTableWidget):
     """Keep model names readable; scroll horizontally when columns cannot fit."""
     def __init__(self, *args):
         super().__init__(*args)
+        self.thumbnail_column = self.columnCount() - 1
         self.column_timer = QTimer(self)
         self.column_timer.setSingleShot(True)
         self.column_timer.timeout.connect(self.fit_model_column)
@@ -840,23 +841,25 @@ class FavoritesDialog(QDialog):
         for table in (self.search_table, self.favorite_table):
             table.ensurePolished()
             row_height = max(round(36 * scale), table.fontMetrics().height() + 14)
-            if table is self.search_table:
-                edge = max(44, min(64, round(48 * scale)))
-                table.setIconSize(QSize(edge, edge))
-                table.setColumnWidth(THUMBNAIL_COLUMN, max(edge + 16, table.fontMetrics().horizontalAdvance(ui_text('图片')) + 16))
-                row_height = max(row_height, edge + 12)
+            edge = max(44, min(64, round(48 * scale)))
+            table.setIconSize(QSize(edge, edge))
+            table.setColumnWidth(table.thumbnail_column, max(edge + 16, table.fontMetrics().horizontalAdvance(ui_text('图片')) + 16))
+            row_height = max(row_height, edge + 12)
             table.verticalHeader().setDefaultSectionSize(row_height)
             for column, width in ((0, 46), (1, 95), (3, 90), (4, 100), (5, 165), (6, 80)):
-                if column < table.columnCount():
+                if column < table.thumbnail_column:
+                    if table is self.favorite_table and column in (3, 4):
+                        width = 140 if column == 3 else 135
                     title = table.horizontalHeaderItem(column).text()
                     table.setColumnWidth(column, max(round(width * scale), table.fontMetrics().horizontalAdvance(title) + 28))
-        self.search_table.column_timer.start(0)
+            table.column_timer.start(0)
 
     def make_table(self, commercial=False):
         labels = [ui_text('选择'), ui_text('C 编号'), ui_text('型号'), ui_text('厂商'), ui_text('封装')]
         if commercial:
-            labels += [ui_text('单价 / 梯度'), ui_text('库存'), ui_text('图片')]
-        table = (SearchTable if commercial else QTableWidget)(0, len(labels))
+            labels += [ui_text('单价 / 梯度'), ui_text('库存')]
+        labels.append(ui_text('图片'))
+        table = ProductTable(0, len(labels))
         table.setHorizontalHeaderLabels(labels)
         table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         table.setSelectionBehavior(QAbstractItemView.SelectRows)
@@ -871,15 +874,15 @@ class FavoritesDialog(QDialog):
         table.setColumnWidth(1, 95)
         table.setColumnWidth(3, 100)
         table.setColumnWidth(4, 115)
-        table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Fixed if commercial else QHeaderView.Stretch)
+        table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Fixed)
+        table.setObjectName('searchProducts' if commercial else 'favoriteProducts')
+        table.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
+        table.setHorizontalScrollMode(QAbstractItemView.ScrollPerPixel)
+        table.horizontalHeader().setSectionResizeMode(table.thumbnail_column, QHeaderView.Fixed)
+        # Stable data/price columns; visually place photos after checkboxes.
+        table.horizontalHeader().moveSection(table.thumbnail_column, 1)
+        table.cellDoubleClicked.connect(lambda row, column: self.open_gallery() if column == table.thumbnail_column else None)
         if commercial:
-            table.setObjectName('searchProducts')
-            table.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
-            table.setHorizontalScrollMode(QAbstractItemView.ScrollPerPixel)
-            table.horizontalHeader().setSectionResizeMode(THUMBNAIL_COLUMN, QHeaderView.Fixed)
-            # Stable data/price columns; visually place photos after checkboxes.
-            table.horizontalHeader().moveSection(THUMBNAIL_COLUMN, 1)
-            table.cellDoubleClicked.connect(lambda row, column: self.open_gallery() if column == THUMBNAIL_COLUMN else None)
             table.setColumnWidth(5, 210)
             table.setColumnWidth(6, 85)
         if self.international:
@@ -1020,10 +1023,10 @@ class FavoritesDialog(QDialog):
         table.item(row, 1).setData(Qt.UserRole, product)
         if table is self.search_table:
             self.append_commerce(row, product)
-            self.set_thumbnail(row, product)
+        self.set_thumbnail(table, row, product)
         table.blockSignals(was_blocked)
 
-    def set_thumbnail(self, row, product):
+    def set_thumbnail(self, table, row, product):
         urls = product.get('thumbnails') or product.get('images') or [product.get('image', '')]
         if isinstance(urls, str):
             urls = [urls]
@@ -1032,27 +1035,44 @@ class FavoritesDialog(QDialog):
         cell.setTextAlignment(Qt.AlignCenter)
         cell.setData(Qt.UserRole, url)
         cell.setToolTip(ui_text('正在加载图片…') if url else ui_text('暂无商品图片'))
-        self.search_table.setItem(row, THUMBNAIL_COLUMN, cell)
+        table.setItem(row, table.thumbnail_column, cell)
         if url in self.thumbnail_cache:
-            self.thumbnail_loaded(row, (url, self.thumbnail_cache[url]))
+            self.thumbnail_loaded(table, row, (url, self.thumbnail_cache[url]))
 
-    def start_thumbnails(self):
-        requests = {}
-        for row in range(self.search_table.rowCount()):
-            cell = self.search_table.item(row, THUMBNAIL_COLUMN)
-            url = cell.data(Qt.UserRole)
-            if url and cell.icon().isNull():
-                requests.setdefault(url, []).append(row)
-        if requests and not self.closing:
-            factory = self.factory
-            self.jobs.start('thumbnails', lambda stop, progress: load_search_thumbnails(requests, factory, stop, progress),
-                            lambda _: None, lambda _: None, self.thumbnail_loaded)
-
-    def thumbnail_loaded(self, row, result):
-        url, image = result
-        if row >= self.search_table.rowCount():
+    def start_thumbnails(self, table=None):
+        if self.closing:
             return
-        cell = self.search_table.item(row, THUMBNAIL_COLUMN)
+        table = self.search_table if table is None else table
+        channel = 'thumbnails' if table is self.search_table else 'favorite-thumbnails'
+        if any(worker.channel == channel and self.jobs.current(worker) for worker in self.jobs.workers):
+            return
+        requests = {}
+        for row in range(table.rowCount()):
+            cell = table.item(row, table.thumbnail_column)
+            url = cell.data(Qt.UserRole)
+            if not url or not cell.icon().isNull():
+                continue
+            if url in self.thumbnail_cache:
+                self.thumbnail_loaded(table, row, (url, self.thumbnail_cache[url]))
+            elif not cell.data(Qt.UserRole + 1) and (url in requests or len(requests) < 20):
+                # Failed photos remain placeholders instead of retrying forever.
+                cell.setData(Qt.UserRole + 1, True)
+                requests.setdefault(url, []).append(row)
+        if requests:
+            factory = self.factory
+            worker = self.jobs.start(channel, lambda stop, progress: load_search_thumbnails(requests, factory, stop, progress),
+                                     lambda _: None, lambda _: None,
+                                     lambda row, result: self.thumbnail_loaded(table, row, result))
+            # Subsequent favorite pages can arrive while this batch is loading.
+            # Drain newly appended rows after completion without restarting it.
+            worker.finished.connect(lambda: self.start_thumbnails(table)
+                                    if self.jobs.revisions.get(channel) == worker.revision else None)
+
+    def thumbnail_loaded(self, table, row, result):
+        url, image = result
+        if row >= table.rowCount():
+            return
+        cell = table.item(row, table.thumbnail_column)
         if cell is None or cell.data(Qt.UserRole) != url:
             return
         cell.setText('—' if image.isNull() else '')
@@ -1184,6 +1204,7 @@ class FavoritesDialog(QDialog):
 
     def clear_session(self):
         self.stop_read()
+        self.jobs.cancel('favorite-thumbnails')
         self.jobs.cancel('restore')
         self.jobs.cancel('save')
         self.jobs.cancel('collect')
@@ -1217,6 +1238,7 @@ class FavoritesDialog(QDialog):
             self.open_login()
             return
         self.jobs.cancel('favorites')
+        self.jobs.cancel('favorite-thumbnails')
         self.items.clear()
         self.favorite_table.setRowCount(0)
         if self.tabs.currentIndex() == 1:
@@ -1241,6 +1263,7 @@ class FavoritesDialog(QDialog):
             if product['part'] not in self.items:
                 self.items[product['part']] = product
                 self.append_row(self.favorite_table, product)
+        self.start_thumbnails(self.favorite_table)
         self.favorite_hint.setText(ui_message('已获取 {0} 个元件 · 第 {1} 页', len(self.items), page))
         self.filter_favorites()
         self.update_collect_button()
@@ -1408,9 +1431,9 @@ class FavoritesDialog(QDialog):
             self.table.item(row, column).setToolTip(product.get(key, ''))
         self.table.blockSignals(False)
         self.show_detail(selected)
-        if self.table is self.search_table and not self.search_table.item(row, THUMBNAIL_COLUMN).data(Qt.UserRole):
-            self.set_thumbnail(row, selected)
-            self.start_thumbnails()
+        if not self.table.item(row, self.table.thumbnail_column).data(Qt.UserRole):
+            self.set_thumbnail(self.table, row, selected)
+            self.start_thumbnails(self.table)
         if self.pending_gallery_part == selected['part']:
             self.pending_gallery_part = ''
             self.open_gallery()
@@ -1511,6 +1534,7 @@ class FavoritesDialog(QDialog):
         if product['part'] not in self.items:
             self.items[product['part']] = product
             self.append_row(self.favorite_table, product)
+        self.start_thumbnails(self.favorite_table)
         self.filter_favorites()
         self.favorite_hint.setText(ui_message('账号收藏已更新 · 已获取 {0} 个元件，可点击「获取收藏」刷新。', len(self.items)))
         self.status.setText(product['part'] + (ui_text(' 已加入商城账号收藏。') if result['added'] else ui_text(' 已在商城账号收藏中。')))
@@ -1537,6 +1561,7 @@ class FavoritesDialog(QDialog):
 
     def favorite_removed(self, result):
         self.collecting = False
+        self.jobs.cancel('favorite-thumbnails')
         product = result['product']
         self.items.pop(product['part'], None)
         self.favorite_checked.discard(product['part'])
@@ -1544,6 +1569,11 @@ class FavoritesDialog(QDialog):
             if self.favorite_table.item(row, 1).text() == product['part']:
                 self.favorite_table.removeRow(row)
                 break
+        for row in range(self.favorite_table.rowCount()):
+            cell = self.favorite_table.item(row, self.favorite_table.thumbnail_column)
+            if cell.text() == '…':
+                cell.setData(Qt.UserRole + 1, False)
+        self.start_thumbnails(self.favorite_table)
         self.favorite_hint.setText(ui_message('账号收藏已更新 · 已获取 {0} 个元件。', len(self.items)))
         self.status.setText(product['part'] + (ui_text(' 已取消账号收藏。') if result['removed'] else ui_text(' 已不在账号收藏中。')))
         self.update_count()

@@ -121,6 +121,8 @@ The account control at the top right shares sign-in status across pages. Mainlan
 
 After mainland sign-in, open the account-favorites page and refresh the list as needed. Check parts and add them to the download list. Search products can be saved as favorites, and existing favorites can be removed. Removing an account favorite or a queue row leaves downloaded files intact.
 
+Favorite rows also show product thumbnails; double-click a photo to open the original gallery. Photos load asynchronously in batches and share the search-page cache. Refreshing or removing favorites discards outdated image responses while filtering and checkbox selection remain available.
+
 Import deduplicates by C-number and retains existing checked states and download results. Newly imported parts are checked in the workspace. Favorites can be filtered after retrieval; favorites selection and import apply to the visible filtered items. Wait for an active download to finish before changing the queue.
 
 ## Native Altium Designer libraries

@@ -615,6 +615,118 @@ class SessionVaultTests(unittest.TestCase):
 
 @unittest.skipUnless(sys.platform == 'win32', 'Native Qt window regression')
 class NativeStoreWindowTests(unittest.TestCase):
+    def test_favorite_photos_fit_rows_and_preserve_filter_selection_and_gallery(self):
+        self.login()
+        self.wait_until(lambda: not self.dialog.has_jobs())
+        table = self.dialog.favorite_table
+        self.assertEqual(table.rowCount(), 3)
+        for row in range(3):
+            cell = table.item(row, table.thumbnail_column)
+            self.assertFalse(cell.icon().isNull())
+            self.assertLess(table.visualItemRect(cell).right(), table.visualItemRect(table.item(row, 1)).left())
+            self.assertGreaterEqual(table.rowHeight(row), table.iconSize().height() + 12)
+        self.assertGreaterEqual(table.columnWidth(2), 150)
+        self.assertEqual(table.horizontalScrollBar().maximum(), 0)
+        table.item(2, 0).setCheckState(Qt.Checked)
+        self.dialog.filter_input.setText('C163691')
+        self.assertTrue(table.isRowHidden(0))
+        self.assertFalse(table.isRowHidden(2))
+        self.assertEqual([p['part'] for p in self.dialog.selected_items()], ['C163691'])
+        self.dialog.filter_input.clear()
+        point = table.visualItemRect(table.item(0, table.thumbnail_column)).center()
+        QTest.mouseClick(table.viewport(), Qt.LeftButton, pos=point)
+        QTest.mouseDClick(table.viewport(), Qt.LeftButton, pos=point)
+        self.wait_until(lambda: self.dialog.galleries and self.dialog.galleries[0].view.photo)
+        self.assertEqual(self.dialog.galleries[0].part, 'C2040')
+        self.assertEqual([p['part'] for p in self.dialog.selected_items()], ['C163691'])
+
+    def test_streamed_favorite_photos_continue_without_restarting_or_blocking_search(self):
+        started, release = threading.Event(), threading.Event()
+        requests = []
+        def read(url, stop):
+            requests.append(url)
+            if url == 'slow':
+                started.set()
+                release.wait(5)
+            return b'bad image' if url == 'bad' else fixture_png()
+        client = SimpleNamespace(image=read)
+        extra = [dict(part=f'C{index}', thumbnails=[f'photo-{index}']) for index in range(10, 35)]
+        with patch.object(self.dialog, 'factory', return_value=client), \
+             patch.object(self.dialog, 'show_detail'), patch.object(self.dialog, 'request_detail'):
+            try:
+                self.dialog.page_loaded(1, [dict(part='C1', thumbnails=['slow'])])
+                self.wait_until(started.is_set)
+                self.dialog.page_loaded(2, [dict(part='C2', thumbnails=['later']),
+                                           dict(part='C3', thumbnails=['bad']), dict(part='C4')] + extra)
+                self.dialog.search_loaded(dict(page=1, pages=1, total=1,
+                                               items=[dict(part='C5', thumbnails=['search'])]))
+                self.wait_until(lambda: not self.dialog.search_table.item(0, THUMBNAIL_COLUMN).icon().isNull())
+                self.assertFalse(release.is_set())
+            finally:
+                release.set()
+            self.wait_until(lambda: not self.dialog.has_jobs())
+        table = self.dialog.favorite_table
+        self.assertFalse(table.item(0, table.thumbnail_column).icon().isNull())
+        self.assertFalse(table.item(1, table.thumbnail_column).icon().isNull())
+        self.assertEqual(table.item(2, table.thumbnail_column).text(), '—')
+        self.assertEqual(table.item(3, table.thumbnail_column).text(), '—')
+        for row in range(4, table.rowCount()):
+            self.assertFalse(table.item(row, table.thumbnail_column).icon().isNull())
+        self.assertCountEqual(requests, ['slow', 'later', 'bad', 'search'] + [f'photo-{index}' for index in range(10, 35)])
+
+    def test_removing_favorite_during_photo_load_cannot_shift_photos_to_another_product(self):
+        started, release = threading.Event(), threading.Event()
+        def read(url, stop):
+            if url == 'removed':
+                started.set()
+                release.wait(5)
+            return fixture_png()
+        client = SimpleNamespace(image=read)
+        with patch.object(self.dialog, 'factory', return_value=client):
+            try:
+                self.dialog.page_loaded(1, [dict(part='C1', thumbnails=['removed'])])
+                self.wait_until(started.is_set)
+                self.dialog.page_loaded(2, [dict(part='C2', thumbnails=['remaining'])])
+                self.dialog.favorite_removed(dict(product=dict(part='C1'), removed=True))
+                table = self.dialog.favorite_table
+                self.wait_until(lambda: not table.item(0, table.thumbnail_column).icon().isNull())
+            finally:
+                release.set()
+            self.wait_until(lambda: not self.dialog.has_jobs())
+        self.assertEqual(table.rowCount(), 1)
+        self.assertEqual(table.item(0, 1).text(), 'C2')
+        self.assertEqual(table.item(0, table.thumbnail_column).data(Qt.UserRole), 'remaining')
+        self.assertNotIn('removed', self.dialog.thumbnail_cache)
+
+    def test_new_favorite_reuses_search_photo_cache_and_refresh_discards_old_photos(self):
+        self.login()
+        self.search_ready('C2')
+        self.wait_until(lambda: not self.dialog.has_jobs())
+        product = self.dialog.current_product
+        requests = len(self.service.requests)
+        self.dialog.favorite_added(dict(product=product, added=True))
+        table = self.dialog.favorite_table
+        self.assertFalse(table.item(3, table.thumbnail_column).icon().isNull())
+        self.wait_until(lambda: not self.dialog.has_jobs())
+        self.assertEqual(len(self.service.requests), requests)
+
+        started, release = threading.Event(), threading.Event()
+        def read(url, stop):
+            started.set()
+            release.wait(5)
+            return fixture_png()
+        client = SimpleNamespace(image=read)
+        with patch.object(self.dialog, 'factory', return_value=client):
+            try:
+                self.dialog.page_loaded(3, [dict(part='C9', thumbnails=['old-account'])])
+                self.wait_until(started.is_set)
+                self.dialog.start_read()
+            finally:
+                release.set()
+            self.wait_until(lambda: not self.dialog.has_jobs())
+        self.assertEqual(table.rowCount(), 3)
+        self.assertNotIn('old-account', self.dialog.thumbnail_cache)
+
     def test_search_photos_fit_rows_reuse_cache_and_open_original_gallery(self):
         self.service.search_pages[('图片', 1)] = fixture_search([('C2040', 'RP2040'), ('C2', 'Other')])
         self.search_ready('图片')
