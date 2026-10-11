@@ -551,6 +551,8 @@ ENGLISH.update({
     '网络请求失败': 'Network request failed',
     '网络请求失败：{0}': 'Network request failed: {0}',
     '服务器返回 HTTP {0}': 'Server returned HTTP {0}',
+    '服务器繁忙或请求过于频繁（HTTP {0}），请稍后重试': 'Server busy or rate limited (HTTP {0}). Please retry later.',
+    '服务器要求较长时间后重试，请稍后重新下载': 'The server requires a longer wait. Please download again later.',
     '请使用有效的立创 C 编号': 'Enter a valid LCSC C-number',
     '未找到器件，请核对立创 C 编号': 'Part not found. Check the LCSC C-number.',
     '接口返回了无法识别的数据，请稍后重试': 'Unrecognized server response. Please retry later.',

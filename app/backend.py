@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
 from typing import Callable
+from urllib.parse import urlsplit
 
 from errors import Cancelled, DownloadError
 from app_settings import proxy_for_url, proxy_mode
@@ -38,6 +39,46 @@ COMPONENT_ENDPOINTS = ('https://lceda.cn/api/products/{part}/components',
                        'https://easyeda.com/api/products/{part}/components')
 ENDPOINT_3D_MODEL = 'https://modules.easyeda.com/3dmodel/{uuid}'
 ENDPOINT_3D_MODEL_STEP = 'https://modules.easyeda.com/qAxj6KHrDKw4blvCG8QJPs7Y/{uuid}'
+RESOURCE_REQUEST_ATTEMPTS = 5
+RESOURCE_RETRY_BACKOFF = 5.0
+RESOURCE_MAX_AUTOMATIC_WAIT = 120.0
+
+
+class ResourceCooldowns:
+    """Share server backoff across downloads, metadata and preview API instances."""
+    def __init__(self):
+        self.deadlines = {}
+        self.lock = threading.Lock()
+
+    @staticmethod
+    def origin(url):
+        parsed = urlsplit(url)
+        return parsed.scheme, parsed.hostname, parsed.port
+
+    def defer(self, url, seconds):
+        now = time.monotonic()
+        origin = self.origin(url)
+        with self.lock:
+            self.deadlines = {key: deadline for key, deadline in self.deadlines.items() if deadline > now}
+            self.deadlines[origin] = max(self.deadlines.get(origin, now), now + seconds)
+
+    def wait(self, url, cancelled):
+        origin = self.origin(url)
+        while True:
+            if cancelled.is_set():
+                raise Cancelled()
+            with self.lock:
+                delay = self.deadlines.get(origin, 0) - time.monotonic()
+            if delay <= 0:
+                return
+            if delay > RESOURCE_MAX_AUTOMATIC_WAIT:
+                # Do not retry early or leave a worker waiting for an unbounded header.
+                raise DownloadError('服务器要求较长时间后重试，请稍后重新下载')
+            if cancelled.wait(delay):
+                raise Cancelled()
+
+
+RESOURCE_COOLDOWNS = ResourceCooldowns()
 
 
 class PayloadCache:
@@ -150,23 +191,44 @@ class NetworkApi:
 
     @traced('resources.request', lambda self, url, **kw: {'host': network_target(url)})
     def fetch(self, url: str, optional: bool = False) -> bytes | None:
-        for attempt in range(2):
+        transient_failures = 0
+        for attempt in range(RESOURCE_REQUEST_ATTEMPTS):
             self.check_cancelled()
+            RESOURCE_COOLDOWNS.wait(url, self.cancelled)
             proxy = proxy_for_url(url, 'store')
             response = None
+            shared_backoff = False
             try:
                 log_event('DEBUG', 'resources.request_started', operation='元件资源请求',
                           proxy_mode=proxy_mode('store'), using_proxy=proxy is not None, attempt=attempt + 1)
                 response = connection_pool(proxy).request('GET', url, headers=self.headers, preload_content=False,
                     timeout=Timeout(connect=6, read=18), pool_timeout=18,
-                    retries=Retry(total=2, connect=0, read=0, status=0, redirect=2))
+                    # urllib3 otherwise raises on 429/503 + Retry-After with status=0,
+                    # or sleeps internally without observing our cancellation event.
+                    retries=Retry(total=2, connect=0, read=0, status=0, redirect=2,
+                                  respect_retry_after_header=False))
                 if optional and response.status in (404, 410):
                     log_event('WARNING', 'resources.unavailable', status=response.status)
                     return None
                 if response.status >= 400:
                     log_event('WARNING', 'resources.http_rejected', status=response.status, attempt=attempt + 1)
-                    if response.status < 500 or attempt:
-                        raise DownloadError(f'服务器返回 HTTP {response.status}')
+                    if response.status == 429 or (response.status == 503 and response.headers.get('Retry-After')):
+                        delay = None
+                        try:
+                            delay = Retry(retry_after_max=float('inf')).get_retry_after(response)
+                        except (urllib3.exceptions.InvalidHeader, ValueError, OverflowError):
+                            log_event('WARNING', 'resources.retry_after_invalid', status=response.status)
+                        delay = delay if delay and delay > 0 else RESOURCE_RETRY_BACKOFF * 2 ** attempt
+                        RESOURCE_COOLDOWNS.defer(url, delay)
+                        shared_backoff = True
+                        log_event('WARNING', 'resources.rate_limited', status=response.status,
+                                  attempt=attempt + 1, retry_seconds=delay)
+                        if attempt == RESOURCE_REQUEST_ATTEMPTS - 1:
+                            raise DownloadError(f'服务器繁忙或请求过于频繁（HTTP {response.status}），请稍后重试')
+                    else:
+                        transient_failures += 1
+                        if response.status < 500 or transient_failures >= 2 or attempt == RESOURCE_REQUEST_ATTEMPTS - 1:
+                            raise DownloadError(f'服务器返回 HTTP {response.status}')
                 else:
                     chunks = []
                     while True:
@@ -185,14 +247,16 @@ class NetworkApi:
             except (urllib3.exceptions.HTTPError, TimeoutError, OSError) as exc:
                 self.check_cancelled()
                 record_error(exc, 'resources.attempt_failed', level='WARNING', attempt=attempt + 1)
-                if attempt:
+                transient_failures += 1
+                if transient_failures >= 2 or attempt == RESOURCE_REQUEST_ATTEMPTS - 1:
                     record_request_error(exc, '元件资源请求')
                     raise DownloadError(f'网络请求失败：{getattr(exc, "reason", exc)}') from exc
             finally:
                 if response is not None:
                     response.close()
                     response.release_conn()
-            if self.cancelled.wait(0.7):
+            # Responses must be closed/released before another worker waits for a slot.
+            if not shared_backoff and self.cancelled.wait(0.7):
                 raise Cancelled()
         raise DownloadError('网络请求失败')
 
