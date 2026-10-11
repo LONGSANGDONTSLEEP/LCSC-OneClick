@@ -4,6 +4,7 @@ import errno
 import http.client
 import json
 import logging
+import subprocess
 import os
 from pathlib import Path
 import sys
@@ -136,6 +137,80 @@ class DiagnosticTests(unittest.TestCase):
             self.assertTrue(output)
             self.assertEqual(self.entries(event + '.finished')[0]['part'], 'C2765186')
 
+    def test_kicad_partial_failure_records_source_primitive_stage_and_batch(self):
+        bad=fixture('C31966')
+        bad['packageDetail']['dataStr']['shape'].append('FUTURE~PRIVATE-source-record')
+        api=backend.NetworkApi()
+        api.get_cad_data_of_component=lambda part: bad if part=='C31966' else fixture(part)
+        options=backend.Options(self.directory/'exports',('KICAD_SYMBOL','KICAD_FOOTPRINT'),kicad_merge=True)
+        results=backend.download_batch(['C31966','C23922'],options,api=api)
+        self.assertEqual([r.status for r in results],['部分完成','成功'])
+        row=next(r for r in self.entries('export.kicad_conversion_failed') if r['part']=='C31966')
+        cause=self.assert_cause(row,'EdaError','require')
+        self.assertEqual((cause['eda_code'],cause['eda_domain'],cause['eda_primitive']),
+                         ('unsupported_primitive','footprint','FUTURE'))
+        self.assertEqual((row['format'],row['stage']),('KICAD_FOOTPRINT','convert'))
+        self.assertEqual(self.entries('download.export_plan')[0]['mode'],'merge')
+        done=self.entries('download.format_completed')
+        self.assertEqual({(r['part'],r['format']) for r in done},
+                         {('C31966','KICAD_SYMBOL'),('C23922','KICAD_SYMBOL'),('C23922','KICAD_FOOTPRINT')})
+        failed=self.entries('download.format_failed')
+        self.assertEqual([(r['part'],r['format'],r['stage']) for r in failed],[('C31966','KICAD_FOOTPRINT','convert')])
+        self.assertEqual(len({r['root_id'] for r in done+failed+[row]}),1)
+        self.assert_private_absent('PRIVATE-source-record')
+
+    def test_ad_rejection_and_ir_import_keep_structured_diagnostics(self):
+        data=fixture('C31966')
+        data['packageDetail']['dataStr']['shape'].append('FUTURE~PRIVATE-source-record')
+        api=backend.NetworkApi()
+        api.get_cad_data_of_component=lambda part:data
+        backend.download_batch(['C31966'],backend.Options(self.directory/'ad',('SCHLIB','PCBLIB'),True,True),api=api)
+        row=self.entries('download.format_failed')[0]
+        self.assertEqual(self.assert_cause(row,'EdaError')['eda_primitive'],'FUTURE')
+        data['packageDetail']['dataStr']['shape']=['VIA~4000~3000~2~~5~gge123']
+        from easyeda_import import parse_component
+        from eda_ir import dumps,loads,require_domain
+        component=loads(dumps(parse_component(data,'C31966')))
+        self.assertEqual(self.entries('eda.import_domain_failed')[-1]['domain'],'footprint')
+        with self.assertRaises(DownloadError) as caught:
+            require_domain(component,'footprint')
+        self.assertEqual(caught.exception.eda_code,'invalid_via_dimensions')
+        self.assert_private_absent('PRIVATE-source-record')
+
+    def test_kicad_write_failure_and_cancel_log_rollback_and_preserve_previous_files(self):
+        import library_files
+        api=backend.NetworkApi()
+        api.get_cad_data_of_component=lambda part:fixture(part)
+        root=self.directory/'libraries'
+        options=backend.Options(root,('KICAD_SYMBOL','KICAD_FOOTPRINT'),kicad_merge=True)
+        backend.download_batch(['C23922'],options,api=api)
+        before={p.relative_to(root):p.read_bytes() for p in root.rglob('*') if p.is_file()}
+        original=library_files.replace_file
+        for cancelled in (False,True):
+            start=len(self.entries())
+            stop=threading.Event()
+            api.cancelled=stop
+            def fail(source,target):
+                if target.suffix=='.kicad_sym':
+                    if cancelled:
+                        stop.set()
+                        raise Cancelled()
+                    raise PermissionError(errno.EACCES,'PRIVATE-path')
+                return original(source,target)
+            with patch('library_files.replace_file',side_effect=fail):
+                backend.download_batch(['C31966'],options,cancelled=stop,api=api)
+            events=self.entries()[start:]
+            self.assertTrue(any(r['event']=='library.rollback_completed' for r in events))
+            self.assertEqual(before,{p.relative_to(root):p.read_bytes() for p in root.rglob('*') if p.is_file()})
+            if cancelled:
+                self.assertTrue(any(r['event']=='download.format_cancelled' and r['part']=='C31966' for r in events))
+                self.assertFalse([r for r in events if r['level'] in ('ERROR','CRITICAL')])
+            else:
+                row=next(r for r in events if r['event']=='download.kicad_failed')
+                self.assertEqual(row['stage'],'write')
+                self.assertEqual(self.assert_cause(row,'PermissionError')['errno'],errno.EACCES)
+        self.assert_private_absent('PRIVATE-path')
+
     def test_shared_footprint_reuse_and_deferred_outputs_keep_batch_diagnostics(self):
         data = {part: fixture(part) for part in ('C23922', 'C8734')}
         api = backend.NetworkApi()
@@ -220,6 +295,34 @@ class DiagnosticTests(unittest.TestCase):
         logs.stop_crash_capture()
         self.assertFalse(list(self.folder.glob('run-*.json')))
         self.assertFalse(list(self.folder.glob('LCSC3D-crash-*.log')))
+
+    def test_native_crash_after_clear_is_captured_in_isolated_subprocess(self):
+        profile=self.directory/'crash-child'
+        code=f'''import sys, os, faulthandler
+sys.path.insert(0,{str(Path(__file__).resolve().parents[1])!r})
+if sys.platform=='win32':
+    import ctypes
+    ctypes.windll.kernel32.SetErrorMode(0x8002)
+from app_logging import configure_logging,start_crash_capture,log_event
+from log_support import clear_logs
+configure_logging(version="crash-test")
+start_crash_capture()
+log_event("ERROR","test.before_clear")
+clear_logs()
+log_event("ERROR","test.after_clear")
+faulthandler._sigsegv()
+'''
+        result=subprocess.run([sys.executable,'-c',code],cwd=self.directory,
+            env={**os.environ,'LOCALAPPDATA':str(profile)},stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=20)
+        self.assertNotEqual(result.returncode,0)
+        folder=profile/'LCSC3D/logs'
+        log=(folder/'LCSC3D.log').read_text('utf-8')
+        self.assertIn('test.after_clear',log)
+        self.assertNotIn('test.before_clear',log)
+        dumps=list(folder.glob('LCSC3D-crash-*.log'))
+        self.assertEqual(len(dumps),1)
+        self.assertIn(b'<module>',dumps[0].read_bytes())
+        self.assertTrue(list(folder.glob('run-*.json')))
 
     def test_broken_network_records_http_stage_and_original_cause(self):
         client = StoreClient()

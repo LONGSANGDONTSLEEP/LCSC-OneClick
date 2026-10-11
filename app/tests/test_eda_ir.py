@@ -11,7 +11,7 @@ import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from eda_ir import Component, Extension, Pin, Pad, Point, Symbol, SymbolUnit, Footprint, D, loads, dumps, require_domain
+from eda_ir import Component, Extension, Pin, Pad, Via, Point, Symbol, SymbolUnit, Footprint, D, loads, dumps, require_domain
 from easyeda_import import parse_component
 from errors import DownloadError, Cancelled
 from kicad import build_library, FORMATS
@@ -56,6 +56,71 @@ class IRTests(unittest.TestCase):
         self.assertEqual(component.symbol.reference, 'U?')
         self.assertEqual(component.symbol.units[0].items[0].number, 'A1')
         self.assertEqual(loads(dumps(component)), component)
+        current=loads((FIXTURES/'ir_v1_1_via.json').read_text('utf-8'))
+        self.assertEqual(current.schema_version,'1.1')
+        self.assertIsInstance(current.footprint.items[1],Via)
+        self.assertEqual(loads(dumps(current)),current)
+
+    def test_real_thermal_vias_remain_distinct_and_keep_copper_drill_and_span(self):
+        import struct
+        from test_kicad import sexpr, children, child
+        from eda_targets import KICAD
+        component = loads(dumps(parse_component(fixture('C31966'), 'C31966')))
+        self.assertEqual(component.schema_version, '1.1')
+        vias = [v for v in component.footprint.items if isinstance(v, Via)]
+        self.assertEqual(len(vias), 4)
+        self.assertEqual(len([p for p in component.footprint.items if isinstance(p, Pad)]), 9)
+        expected = {('0.500126','0.499872'),('-0.499872','0.499872'),
+                    ('-0.499872','-0.500126'),('0.500126','-0.500126')}
+        self.assertEqual({(str(v.center.x),str(v.center.y)) for v in vias}, expected)
+        self.assertTrue(all(v.diameter == D('0.6096') and v.drill == D('0.3048') and v.net == '' for v in vias))
+        self.assertTrue(all((v.start_layer,v.end_layer) == ('top_copper','bottom_copper') for v in vias))
+        _,pads,other = pcb(export_pcblib(component,'C31966'))
+        self.assertEqual(len(pads),9)
+        records = [b for kind,b in other if kind == 3]
+        self.assertEqual(len(records),4)
+        self.assertEqual({struct.unpack_from('<iiiiBB',b,13) for b in records},
+            {(196900,196800,240000,120000,1,32),(-196800,196800,240000,120000,1,32),
+             (-196800,-196900,240000,120000,1,32),(196900,-196900,240000,120000,1,32)})
+        artifacts,errors = build_library([component],{component.part:FORMATS},'Vias')
+        self.assertFalse(errors)
+        pads = children(sexpr(next(a.payload for a in artifacts if a.format == 'KICAD_FOOTPRINT')),'pad')
+        self.assertEqual(len(pads),13)
+        holes = [p for p in pads if children(p,'drill')]
+        self.assertEqual(len(holes),4)
+        self.assertTrue(all(p[1:4] == ['', 'thru_hole', 'circle'] for p in holes))
+        self.assertTrue(all(child(p,'size')[1:] == ['0.6096','0.6096'] and child(p,'drill')[1:] == ['0.3048'] for p in holes))
+        limited = replace(KICAD,features=KICAD.features-{'through-vias'})
+        with self.assertRaisesRegex(DownloadError,'through-vias'):
+            limited.require(component,'footprint')
+        self.assertIsNotNone(limited.require(component,'symbol'))
+
+    def test_invalid_vias_and_future_spans_fail_without_discarding_other_domain(self):
+        for value in ('0','-1','5'):
+            data=fixture('C31966')
+            shapes=data['packageDetail']['dataStr']['shape']
+            index=next(i for i,s in enumerate(shapes) if s.startswith('VIA~'))
+            fields=shapes[index].split('~');fields[5]=value;shapes[index]='~'.join(fields)
+            component=loads(dumps(parse_component(data,'C31966')))
+            self.assertIsNotNone(require_domain(component,'symbol'))
+            with self.assertRaisesRegex(DownloadError,'孔径和铜环'):
+                require_domain(component,'footprint')
+        component=parse_component(fixture('C31966'),'C31966')
+        altered=replace(component,footprint=replace(component.footprint,items=tuple(
+            replace(i,end_layer='inner_copper_1') if isinstance(i,Via) else i for i in component.footprint.items)))
+        with self.assertRaisesRegex(DownloadError,'贯穿'):
+            export_pcblib(altered,'C31966')
+        _,errors=build_library([altered],{'C31966':FORMATS},'Vias')
+        self.assertIn(('C31966','KICAD_FOOTPRINT'),errors)
+
+    def test_unknown_primitive_diagnostic_names_source_kind_in_both_targets(self):
+        data=fixture('C31966')
+        data['packageDetail']['dataStr']['shape'].append('FUTURE~PRIVATE-source-record')
+        component=loads(dumps(parse_component(data,'C31966')))
+        with self.assertRaisesRegex(DownloadError,'封装图元：FUTURE'):
+            export_pcblib(component,'C31966')
+        _,errors=build_library([component],{'C31966':FORMATS},'Vias')
+        self.assertIn('封装图元：FUTURE',errors['C31966','KICAD_FOOTPRINT'])
 
     def test_pin_electrical_semantics_and_unknown_source_values_survive_roundtrip(self):
         for source, expected in (('', 'unspecified'), ('0', 'unspecified'), ('1', 'input'),

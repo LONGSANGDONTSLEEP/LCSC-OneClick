@@ -13,11 +13,12 @@ import math
 import re
 from pathlib import PurePosixPath
 
-from eda_ir import (D, Point, Pin, Pad, Graphic, Component, Extension, decimal, xy, rotate,
+from eda_ir import (D, Point, Pin, Pad, Via, Graphic, Component, Extension, decimal, xy, rotate,
                     require_domain, check_extensions, graphic_paths)
 from eda_geometry import polygon_anchor
 from errors import DownloadError
 from eda_targets import KICAD
+from app_logging import traced, safe_part, record_error
 
 FORMATS = ('KICAD_SYMBOL', 'KICAD_FOOTPRINT')
 FORMAT_LABELS = {'KICAD_SYMBOL': 'KiCad 符号库', 'KICAD_FOOTPRINT': 'KiCad 封装库'}
@@ -164,6 +165,7 @@ def symbol_graphic(item, check):
     return result
 
 
+@traced('export.kicad_symbol', lambda component, *a, **kw: {'part': safe_part(component.part), 'format': 'KICAD_SYMBOL', 'stage': 'convert'}, level='INFO')
 def symbol_definition(component, name, footprint='', check=lambda: None, *, electrical_policy='source'):
     symbol = KICAD.require(component, 'symbol')
     reference = symbol.reference.rstrip('?0123456789') or 'U'
@@ -294,6 +296,7 @@ def pad_definition(item, check):
             f'(solder_mask_margin {n(item.solder_margin)}) (solder_paste_margin {n(item.paste_margin)}) {primitives})')
 
 
+@traced('export.kicad_footprint', lambda component, *a, **kw: {'part': safe_part(component.part), 'format': 'KICAD_FOOTPRINT', 'stage': 'convert'}, level='INFO')
 def footprint_definition(component, name, check=lambda: None):
     footprint = KICAD.require(component, 'footprint')
     description = '\n'.join(filter(None, (component.description, 'Source: ' + component.source,
@@ -305,6 +308,14 @@ def footprint_definition(component, name, check=lambda: None):
     for item in footprint.items:
         check()
         check_extensions(item)
+        if isinstance(item, Via):
+            # Footprint files cannot contain board vias. Preserve plated copper
+            # and drill geometry as an unnumbered through-hole, as KiCad's own
+            # Altium footprint importer does; never invent a schematic pin.
+            result.append(f'(pad "" thru_hole circle (at {p(item.center, pcb=True)}) '
+                          f'(size {n(item.diameter)} {n(item.diameter)}) (drill {n(item.drill)}) '
+                          '(layers "*.Cu" "*.Mask"))')
+            continue
         if isinstance(item, Pad):
             result.append(pad_definition(item, check))
             continue
@@ -369,6 +380,8 @@ def footprint_definition(component, name, check=lambda: None):
 
 def conversion_warnings(component, formats):
     messages = []
+    if 'KICAD_FOOTPRINT' in formats and component.footprint and any(isinstance(i, Via) for i in component.footprint.items):
+        messages.append('封装过孔按无编号镀通孔输出')
     if 'KICAD_FOOTPRINT' in formats and component.footprint and any(
             isinstance(i, Graphic) and i.kind == 'region' and i.layer in BODY_LAYERS for i in component.footprint.items):
         messages.append('器件外形投影层按装配轮廓输出')
@@ -433,6 +446,7 @@ def build_library(components, requested, name, check=lambda: None, *, electrical
                 artifacts[index] = Artifact(old.path, old.payload, old.format, old.parts + (component.part,))
             footprint_names[component.part] = PurePosixPath(library).name + ':' + target
         except DownloadError as exc:
+            record_error(exc, 'export.kicad_conversion_failed', part=safe_part(component.part), format='KICAD_FOOTPRINT', stage='convert')
             errors[(component.part, 'KICAD_FOOTPRINT')] = str(exc)
     definitions, members = {}, {}
     used_names = set()
@@ -453,6 +467,7 @@ def build_library(components, requested, name, check=lambda: None, *, electrical
             used_names.add((library.casefold(), target.casefold()))
             members.setdefault(library, []).append(component.part)
         except DownloadError as exc:
+            record_error(exc, 'export.kicad_conversion_failed', part=safe_part(component.part), format='KICAD_SYMBOL', stage='convert')
             errors[(component.part, 'KICAD_SYMBOL')] = str(exc)
     for library, items in definitions.items():
         if items:

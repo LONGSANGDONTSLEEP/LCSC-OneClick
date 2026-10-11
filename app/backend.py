@@ -705,7 +705,8 @@ def download_batch(parts, options, cancelled=None, progress=None, on_result=None
     if options.append_mode and not merged_paths:
         raise DownloadError('请至少选择一种 AD 库格式以加入工程')
     log_event('INFO', 'download.export_plan', mode='append' if options.append_mode else
-              'merge' if merged_paths else 'individual', formats=options.formats,
+              'merge' if merged_paths or any(fmt in options.formats and merge for fmt, merge in (
+                  ('KICAD_SYMBOL', options.kicad_merge_symbols), ('KICAD_FOOTPRINT', options.kicad_merge_footprints))) else 'individual', formats=options.formats,
               existing_formats=list(options.existing_targets()), project_selected=bool(options.project_path),
               import_project=options.imports_project(),
               individual_formats=[fmt for fmt in merged_paths if options.keeps_individual(fmt)])

@@ -13,7 +13,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'app'))
 from easyeda_import import parse_component
-from eda_ir import Pad, Pin
+from eda_ir import Pad, Pin, Via
 from kicad import build_library, FORMATS, pin_electrical_type
 
 
@@ -60,7 +60,7 @@ def main():
     fixtures = ROOT / 'app/tests/fixtures'
     cases = json.loads(gzip.decompress((fixtures / 'official_ad_cases.json.gz').read_bytes()))['cases']
     cases += [{'part': p, 'data': json.loads((fixtures / (p + '.json')).read_text('utf-8'))}
-              for p in ('C23922', 'C8734', 'C5879483')]
+              for p in ('C23922', 'C8734', 'C5879483', 'C31966')]
     components = [parse_component(c['data'], c['part']) for c in cases]
     by_part = {c.part: c for c in components}
     artifacts, errors = build_library(components, {c.part: FORMATS for c in components}, 'LCSC3D_Test')
@@ -77,7 +77,12 @@ def main():
                  'drill': float(p.drill), 'slot': float(p.slot_length),
                  'drill_rotation': float(p.drill_rotation), 'plated': p.plated, 'layer': p.layer,
                  'bbox': expected_bbox(p)}
-                for p in source.footprint.items if isinstance(p, Pad)]})
+                if isinstance(p, Pad) else
+                {'number': '', 'position': [float(p.center.x), -float(p.center.y)],
+                 'drill': float(p.drill), 'slot': 0, 'drill_rotation': 0, 'plated': True, 'layer': 'all_copper',
+                 'bbox': [float(p.center.x-p.diameter/2),float(-p.center.y-p.diameter/2),
+                          float(p.center.x+p.diameter/2),float(-p.center.y+p.diameter/2)]}
+                for p in source.footprint.items if isinstance(p, (Pad,Via))]})
     manifest_path = out / 'geometry-expected.json'
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), 'utf-8')
     (out / 'symbol-svg').mkdir(exist_ok=True)

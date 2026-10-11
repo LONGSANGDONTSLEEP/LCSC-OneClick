@@ -187,6 +187,12 @@ def _track_record(layer, a, b, width):
     return b'\x04' + _block(body)
 
 
+def _via_record(center, diameter, drill):
+    # PCB 6.0 simple via: common header, XY, land diameter, hole diameter, span.
+    body = _common(74) + struct.pack('<iiiiBB', *center, diameter, drill, 1, 32)
+    return b'\x03' + _block(body)
+
+
 def _arc_record(layer, center, radius, width):
     body = _common(layer) + struct.pack('<iiiddi', *center, radius, 0., 360., width)
     return b'\x01' + _block(body)

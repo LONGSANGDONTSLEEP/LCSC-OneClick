@@ -1,8 +1,8 @@
 """Explicit target capability contracts; adding IR features grants no implicit support."""
 from dataclasses import dataclass
 
-from eda_ir import Pin, Pad, require_domain
-from errors import DownloadError
+from eda_ir import Pin, Pad, Via, require_domain, check_via
+from errors import DownloadError, EdaError
 
 
 @dataclass(frozen=True)
@@ -25,6 +25,8 @@ class TargetCapabilities:
         if domain == 'footprint' and any(isinstance(i, Pad) and
                 (i.drill or i.copper_center != i.center) for i in value.items):
             required.add('pad-copper-drill')
+        if domain == 'footprint' and any(isinstance(i, Via) for i in value.items):
+            required.add('through-vias')
         missing = required - self.features
         if missing:
             raise DownloadError(self.name + ' 不支持 IR 能力：' + ', '.join(sorted(missing)))
@@ -43,24 +45,29 @@ class TargetCapabilities:
         for item in items:
             if isinstance(item, Pin):
                 continue
+            if isinstance(item, Via):
+                check_via(item)
+                continue
             if isinstance(item, Pad):
                 if item.shape not in self.pad_shapes:
                     raise DownloadError(self.name + ' 不支持焊盘形状：' + item.shape)
             elif item.kind not in kinds:
-                raise DownloadError(self.name + ' 不支持图元：' + item.kind)
+                primitive = item.source_kind or item.kind
+                raise EdaError(self.name + ' 不支持' + ('符号' if domain == 'symbol' else '封装') + '图元：' + primitive,
+                    code='unsupported_primitive', domain=domain, primitive=primitive, source_id=item.source_id)
         return value
 
 
 ALTIUM = TargetCapabilities(
     'AD', ('SchLib binary 5.0', 'PcbLib binary 6.0'),
-    frozenset({'local-mm-y-up', 'symbol-units', 'pad-copper-drill'}),
+    frozenset({'local-mm-y-up', 'symbol-units', 'pad-copper-drill', 'through-vias'}),
     frozenset({'rect', 'ellipse', 'polyline', 'polygon', 'path', 'text'}),
     frozenset({'rect', 'ellipse', 'polyline', 'path', 'region', 'text'}),
     frozenset({'rect', 'ellipse', 'oval', 'octagon', 'polygon'}), append_existing=True, mechanical_footprints=False)
 
 KICAD = TargetCapabilities(
     'KiCad 8+', ('symbol 20211014', 'footprint 20240108'),
-    frozenset({'local-mm-y-up', 'symbol-units', 'pad-copper-drill'}),
+    frozenset({'local-mm-y-up', 'symbol-units', 'pad-copper-drill', 'through-vias'}),
     frozenset({'rect', 'ellipse', 'polyline', 'polygon', 'path', 'text'}),
     frozenset({'rect', 'ellipse', 'polyline', 'polygon', 'path', 'region', 'text'}),
     frozenset({'rect', 'ellipse', 'oval', 'octagon', 'polygon'}))

@@ -196,6 +196,11 @@ def start(window, destination):
             assert 'settings.self_test_before_clear' not in contents
             assert 'settings.self_test_after_clear' in contents
             report['log_clear_verified'] = True
+            import faulthandler, app_logging
+            faulthandler.dump_traceback(file=app_logging._crash_stream)
+            app_logging._crash_stream.flush()
+            assert b'verify_package' in Path(app_logging._crash_stream.name).read_bytes()
+            report['crash_capture_after_clear_verified'] = True
         except Exception as exc:
             finish(type(exc).__name__ + ': ' + str(exc))
             return

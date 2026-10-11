@@ -7,10 +7,11 @@ import re
 from dataclasses import replace
 
 from eda_geometry import NUMBER, number, points, path_points, pad_outline
-from eda_ir import (D, Point, Stroke, TextStyle, Graphic, Pin, Pad, Property,
+from eda_ir import (D, Point, Stroke, TextStyle, Graphic, Pin, Pad, Via, Property, check_via,
                     SymbolUnit, Symbol, Footprint, Model3D, Diagnostic, Component,
                     Extension, decimal)
-from errors import DownloadError, Cancelled
+from errors import DownloadError, Cancelled, EdaError
+from app_logging import traced, record_error, log_event, safe_part
 from model3d import document, model_reference
 
 UNIT = D('0.254')
@@ -176,7 +177,7 @@ def symbol_item(shape, c, check):
         si = 3 if kind == 'A' else 2
         return Graphic('path', path=c.path(f[1]), stroke=stroke(f[si], f[si + 1], f[si + 2]),
                        fill=no_fill(f[si + 3]), source_id=f[si + 4])
-    return Graphic('unsupported', extensions=source_extension({'kind': kind, 'record': shape}))
+    return Graphic('unsupported', source_kind=kind, extensions=source_extension({'kind': kind, 'record': shape}))
 
 
 def import_symbol(data, part, check):
@@ -196,7 +197,8 @@ def import_symbol(data, part, check):
             try:
                 items.append(preserve_record(symbol_item(shape, c, check), shape, c))
             except (IndexError, ValueError, TypeError) as exc:
-                raise DownloadError('符号 ' + shape.split('~')[0] + ' 图元数据不完整或超出范围') from exc
+                raise EdaError('符号 ' + shape.split('~')[0] + ' 图元数据不完整或超出范围',
+                    code='invalid_source_primitive', domain='symbol', primitive=shape.split('~')[0]) from exc
         result.append(SymbolUnit(index, tuple(items)))
     return Symbol(str(data.get('title') or params.get('name') or part), str(params.get('pre') or 'U?'),
                   tuple(result), tuple(Property(str(k), str(v)) for k, v in params.items()),
@@ -257,6 +259,10 @@ def footprint_item(shape, c, check):
     kind = f[0]
     if kind == 'PAD':
         return import_pad(f, c, check)
+    if kind == 'VIA':
+        via = Via(c.point(f[1], f[2]), length(f[3]), length(f[5]) * 2, net=f[4], source_id=f[6])
+        check_via(via)
+        return via
     if kind == 'HOLE':
         diameter = length(f[3]) * 2
         if diameter <= 0:
@@ -295,7 +301,7 @@ def footprint_item(shape, c, check):
         node = document(shape.partition('~')[2])
         if document(node.get('attrs')).get('c_etype') == 'outline3D':
             return None
-    return Graphic('unsupported', extensions=source_extension({'kind': kind, 'record': shape}))
+    return Graphic('unsupported', source_kind=kind, extensions=source_extension({'kind': kind, 'record': shape}))
 
 
 def import_footprint(data, part, check):
@@ -311,11 +317,13 @@ def import_footprint(data, part, check):
             if item is not None:
                 items.append(preserve_record(item, shape, c))
         except (IndexError, ValueError, TypeError) as exc:
-            raise DownloadError('封装 ' + shape.split('~')[0] + ' 图元数据不完整或超出范围') from exc
+            raise EdaError('封装 ' + shape.split('~')[0] + ' 图元数据不完整或超出范围',
+                code='invalid_source_primitive', domain='footprint', primitive=shape.split('~')[0]) from exc
     return Footprint(str(package.get('title') or params.get('package') or part + '_Footprint'),
                      tuple(items), str(head.get('licence') or ''))
 
 
+@traced('eda.import', lambda data, part, *a, **kw: {'part': safe_part(part), 'domains': kw.get('domains', ('symbol', 'footprint'))})
 def parse_component(data, part, check_cancelled=lambda: None, *, domains=('symbol', 'footprint')):
     if isinstance(data, Component):
         return data
@@ -341,7 +349,9 @@ def parse_component(data, part, check_cancelled=lambda: None, *, domains=('symbo
         except Cancelled:
             raise
         except DownloadError as exc:
-            diagnostics.append(Diagnostic(domain, 'error', 'invalid_source', str(exc)))
+            record_error(exc, 'eda.import_domain_failed', part=safe_part(part), domain=domain, stage='import')
+            diagnostics.append(Diagnostic(domain, 'error', getattr(exc, 'eda_code', 'invalid_source'), str(exc),
+                primitive=getattr(exc, 'eda_primitive', ''), source_id=getattr(exc, 'eda_source_id', '')))
     try:
         reference = model_reference(data)
         if reference:
@@ -352,4 +362,9 @@ def parse_component(data, part, check_cancelled=lambda: None, *, domains=('symbo
                                 extensions=source_extension({'placements': placements})),))
     except (DownloadError, TypeError, ValueError):
         pass  # Model download reports its own errors independently of 2D export.
+    log_event('DEBUG', 'eda.import_result', part=safe_part(part), domains=domains,
+              symbol_units=len(component.symbol.units) if component.symbol else 0,
+              footprint_items=len(component.footprint.items) if component.footprint else 0,
+              vias=sum(isinstance(i, Via) for i in component.footprint.items) if component.footprint else 0,
+              failure_count=len(diagnostics), schema_version=component.schema_version)
     return replace(component, diagnostics=tuple(diagnostics))

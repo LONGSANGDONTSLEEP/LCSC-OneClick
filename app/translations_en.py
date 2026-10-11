@@ -1,6 +1,7 @@
 """English UI catalog. Keys remain the Simplified Chinese source messages."""
 
 ENGLISH = {
+    '封装过孔按无编号镀通孔输出': 'Footprint vias use unnumbered plated through-holes',
     '同名库按本次选择整体覆盖；封装库名称同时用作 KiCad 库昵称': 'Replace same-name libraries with this selection; use the footprint library name as its KiCad nickname',
     '未勾选独立导出器件时，3D 文件集中到“符号库名称_3D”文件夹；仅合并封装库时跟随其名称。': 'Without separate part exports, models use symbol-library-name_3D; when only footprints are combined, their library name is used.',
     '导出到': 'Export to',

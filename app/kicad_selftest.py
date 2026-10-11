@@ -6,7 +6,7 @@ import sys
 import time
 import shutil
 
-from PySide6.QtCore import QTimer, QPoint
+from PySide6.QtCore import QTimer, QPoint, QEvent, QObject
 from PySide6.QtWidgets import QApplication
 
 
@@ -15,7 +15,7 @@ def start(window, folder):
     root = Path(folder).resolve()
     root.mkdir(parents=True, exist_ok=True)
     data = {part: json.loads((root / 'fixtures' / (part + '.json')).read_text('utf-8'))
-            for part in ('C20197', 'C2765186', 'C23922', 'C8734', 'C2040', 'C5879483')}
+            for part in ('C20197', 'C2765186', 'C23922', 'C8734', 'C2040', 'C5879483', 'C31966')}
     class OfflineApi(main.NetworkApi):
         def fetch(self, *args, **kwargs):
             raise AssertionError('Offline self-test must not access the network')
@@ -39,11 +39,20 @@ def start(window, folder):
              ('ad-layout', False, False, 'ad', ['C5879483'] + [f'C90000{i}' for i in range(11)]),
              ('ad-replace', False, False, 'ad', ['C5879483']),
              ('replace', True, True, 'kicad', ['C5879483']),
+             ('via-ad', True, True, 'ad', ['C31966']),
+             ('via-kicad', True, True, 'kicad', ['C31966']),
              ('preview-sample', True, True, 'kicad', ['C2040'])]
     state = {'index': -1, 'phase': 'next', 'deadline': time.monotonic() + 90, 'done': False}
     report = {'version': main.VERSION, 'frozen': bool(getattr(sys, 'frozen', False)), 'cases': []}
     timer = QTimer(window)
     timer.setInterval(70)
+    frames = []
+    class PaintObserver(QObject):
+        def eventFilter(self,widget,event):
+            if event.type() == QEvent.Paint:
+                frames.append((widget.geometry().getRect(),widget.mapTo(window,QPoint()).y()))
+            return False
+    observer = PaintObserver(window)
     def finish(error=''):
         state['done'] = True
         timer.stop()
@@ -67,6 +76,31 @@ def start(window, folder):
         assert window.detail.height() >= window.detail.heightForWidth(window.detail.width())
         assert top(window.export_card) >= top(window.workspace_splitter) + window.workspace_splitter.height() + 12
         report['wrapped_results_and_card_spacing_verified'] = True
+    def check_merge_frames(index=0):
+        try:
+            if index == 4:
+                window.export_card.removeEventFilter(observer)
+                report['merge_transition_frames_verified'] = True
+                finish()
+                return
+            target = 'ad' if index < 2 else 'kicad'
+            window.export_target_box.setCurrentIndex(window.export_target_box.findData(target))
+            box = window.lib_merge_box if target == 'ad' else window.kicad_lib_merge_box
+            window.content_scroll.ensureWidgetVisible(box)
+            def click():
+                frames.clear()
+                box.click()
+                def inspect():
+                    try:
+                        final = (window.export_card.geometry().getRect(),window.export_card.mapTo(window,QPoint()).y())
+                        assert frames and set(frames) == {final}, (target,frames,final)
+                        check_merge_frames(index+1)
+                    except Exception as exc:
+                        finish('Merge paint: '+str(exc))
+                QTimer.singleShot(180,inspect)
+            QTimer.singleShot(120,click)
+        except Exception as exc:
+            finish('Merge control: '+str(exc))
     def tick():
         try:
             if time.monotonic() > state['deadline']:
@@ -89,7 +123,7 @@ def start(window, folder):
                     shutil.copytree(root/('combined' if name == 'replace' else 'ad-layout'), output)
                 state.update(name=name, output=output, before=hashes(output), parts=parts)
                 window.lib_append_box.setChecked(False)
-                window.lib_merge_box.setChecked(name in ('ad-layout','ad-replace'))
+                window.lib_merge_box.setChecked(name in ('ad-layout','ad-replace','via-ad'))
                 window.step_box.setChecked(name == 'copies')
                 window.obj_box.setChecked(False)
                 window.schlib_box.setChecked(ad)
@@ -183,7 +217,9 @@ def start(window, folder):
             elif state['phase'] == 'capture-ad' and time.monotonic() >= state['capture_after']:
                 verify_layout()
                 window.grab().save(str(root/'ad-reversed-and-layout.png'))
-                finish()
+                timer.stop()
+                window.export_card.installEventFilter(observer)
+                check_merge_frames()
             elif state['phase'] == 'wait' and not window.batch_running and not (window.worker and window.worker.isRunning()):
                 rows = [window.results[p] for p in state['parts']]
                 assert all(r.status == '成功' for r in rows), [r.message for r in rows]
@@ -198,6 +234,8 @@ def start(window, folder):
                     window.grab().save(str(root/'kicad-copies-controls.png'))
                 if state['name'] == 'ad-layout':
                     state['layout_rows'] = rows
+                if state['name'] in ('via-ad','via-kicad'):
+                    window.grab().save(str(root/(state['name']+'.png')))
                 report['cases'].append({'name': state['name'], 'statuses': [r.status for r in rows],
                                         'files': sorted(set(p for r in rows for p in r.files)), 'success': True})
                 state['phase'] = 'next'

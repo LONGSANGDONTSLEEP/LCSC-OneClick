@@ -19,7 +19,7 @@ root = args.output.resolve()
 root.mkdir(parents=True, exist_ok=True)
 fixtures = root / 'fixtures'
 fixtures.mkdir(exist_ok=True)
-for part in ('C20197', 'C2765186', 'C23922', 'C8734', 'C2040', 'C5879483'):
+for part in ('C20197', 'C2765186', 'C23922', 'C8734', 'C2040', 'C5879483', 'C31966'):
     shutil.copyfile(ROOT / 'app/tests/fixtures' / (part + '.json'), fixtures / (part + '.json'))
 shutil.copyfile(ROOT / 'app/tests/fixtures/C2040_svgs.json', fixtures / 'C2040_svgs.json')
 shutil.copyfile(ROOT / 'app/tests/fixtures/C5879483_svgs.json', fixtures / 'C5879483_svgs.json')
@@ -35,10 +35,11 @@ assert process.returncode == 0, process.returncode
 report = json.loads((root / 'kicad-verification.json').read_text('utf-8'))
 version = re.search(r"VERSION = '([^']+)'", (ROOT / 'app/main.py').read_text('utf-8')).group(1)
 assert report['success'] and report['frozen'] and report['version'] == version, report
-assert [c['name'] for c in report['cases']] == ['individual', 'combined', 'merge-symbols', 'merge-footprints', 'footprint-only', 'copies', 'reversed', 'ad', 'ad-layout', 'ad-replace', 'replace', 'preview-sample']
+assert [c['name'] for c in report['cases']] == ['individual', 'combined', 'merge-symbols', 'merge-footprints', 'footprint-only', 'copies', 'reversed', 'ad', 'ad-layout', 'ad-replace', 'replace', 'via-ad', 'via-kicad', 'preview-sample']
 assert report['kicad_preview_verified']
 assert report['preview_painted_pixels_verified']
 assert report['reversed_pin_preview_verified'] and report['wrapped_results_and_card_spacing_verified']
+assert report['merge_transition_frames_verified']
 sys.path[:0] = [str(ROOT / 'app'), str(ROOT / 'app/tests')]
 from altium_inspect import schematic, pcb
 ad = next(c for c in report['cases'] if c['name'] == 'ad')
@@ -59,6 +60,14 @@ from kicad import pin_electrical_type
 assert schematic((root/'ad-layout/lcsc3d_v2_3_0_hb.SchLib').read_bytes())[0]['COMPCOUNT'] == '12'
 assert schematic((root/'ad-replace/lcsc3d_v2_3_0_hb.SchLib').read_bytes())[0]['COMPCOUNT'] == '1'
 assert len(children(sexpr((root/'replace/LCSC3D.kicad_sym').read_bytes()),'symbol')) == 1
+via_ad = pcb((root/'via-ad/lcsc3d_v2_3_0_hb.PcbLib').read_bytes())
+assert len(via_ad[1]) == 9 and sum(kind==3 for kind,_ in via_ad[2]) == 4
+import struct
+assert all(struct.unpack_from('<iiBB',data,21)==(240000,120000,1,32) for kind,data in via_ad[2] if kind==3)
+via_fp = next((root/'via-kicad/LCSC3D.pretty').glob('*.kicad_mod'))
+via_pads = children(sexpr(via_fp.read_bytes()),'pad')
+assert len(via_pads)==13 and sum(p[2]=='thru_hole' for p in via_pads)==4
+report['via_geometry_verified'] = True
 for case in report['cases']:
     for name in case['files']:
         path = Path(name)

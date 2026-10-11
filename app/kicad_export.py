@@ -1,12 +1,15 @@
 """Batch planning and whole-library publication for the KiCad target."""
 from pathlib import Path, PurePosixPath
 
-from app_logging import log_event, record_error
+from app_logging import log_event, record_error, safe_part, traced
 from errors import Cancelled
 from kicad import FORMATS, FORMAT_LABELS, build_library, conversion_warnings
 from library_files import commit_library
 
 
+@traced('export.kicad_batch', lambda results, entries, options, *a: {'target': 'kicad',
+        'count': len(entries), 'merge_symbols': options.kicad_merge_symbols,
+        'merge_footprints': options.kicad_merge_footprints, 'electrical_policy': options.kicad_electrical_policy}, level='INFO')
 def export_batch(results, entries, options, check):
     members = [r for r in results if r.part in entries]
     merged = (options.kicad_merge_symbols and 'KICAD_SYMBOL' in options.formats
@@ -24,6 +27,9 @@ def export_batch(results, entries, options, check):
                 (Path(entries[r.part][1]).relative_to(root) / (name + '_' + r.part)).as_posix()
                 for r in rows}
         errors = {}
+        conversion_errors = set()
+        stage = 'convert'
+        cancelled = False
         try:
             check()
             artifacts, errors = build_library([entries[r.part][0] for r in rows], formats, 'LCSC3D', check,
@@ -45,6 +51,8 @@ def export_batch(results, entries, options, check):
                 errors.update(failures)
                 # Publish every footprint before symbols, including retained copies.
                 artifacts.sort(key=lambda a: a.format != 'KICAD_FOOTPRINT')
+            conversion_errors = set(errors)
+            stage = 'write'
             written = commit_library(root, artifacts, check, overwrite=True)
             for artifact, path in written:
                 for row in rows:
@@ -52,6 +60,8 @@ def export_batch(results, entries, options, check):
                         row.files.append(path)
                         if artifact.format not in row.completed_formats:
                             row.completed_formats.append(artifact.format)
+                            log_event('INFO', 'download.format_completed', part=safe_part(row.part),
+                                      format=artifact.format, bytes=len(artifact.payload))
                 log_event('INFO', 'download.library_committed', format=artifact.format, mode='replace',
                           count=len(artifact.parts), bytes=len(artifact.payload))
             for row in rows:
@@ -66,8 +76,9 @@ def export_batch(results, entries, options, check):
                         log_event('WARNING', 'export.approximation', part=row.part, target='kicad',
                                   warnings=list(warnings))
         except Exception as exc:
-            if not isinstance(exc, Cancelled):
-                record_error(exc, 'download.kicad_failed', stage='build_or_commit')
+            cancelled = isinstance(exc, Cancelled)
+            if not cancelled:
+                record_error(exc, 'download.kicad_failed', stage=stage)
             message = '导出已取消' if isinstance(exc, Cancelled) else str(exc)
             for row in rows:
                 for fmt in formats[row.part]:
@@ -75,6 +86,10 @@ def export_batch(results, entries, options, check):
         for row in rows:
             for fmt in formats[row.part]:
                 if (row.part, fmt) in errors:
+                    log_event('INFO' if cancelled else 'ERROR',
+                              'download.format_cancelled' if cancelled else 'download.format_failed',
+                              part=safe_part(row.part), format=fmt,
+                              stage='convert' if (row.part, fmt) in conversion_errors else stage)
                     message = FORMAT_LABELS[fmt] + '：' + errors[(row.part, fmt)]
                     row.export_errors.append(message)
                     row.message = '；'.join(filter(None, (row.message, message)))

@@ -255,6 +255,39 @@ class KiCadTests(unittest.TestCase):
         self.assertEqual(len(list((root/'LCSC3D.pretty').iterdir())),1)
         self.assertEqual(unrelated.read_bytes(),b'other library')
 
+    def test_via_footprints_export_merge_reuse_and_ad_append_without_losing_holes(self):
+        from altium_inspect import pcb
+        from library_merge import LibraryIndex
+        self.api.get_cad_data_of_component=lambda part: fixture('C31966')
+        for formats in (FORMATS,('SCHLIB','PCBLIB')):
+            root=self.root/formats[0]
+            options=backend.Options(root,formats,merge_schlib=True,merge_pcblib=True,kicad_merge=True)
+            rows=backend.download_batch(['C31966','C900001'],options,api=self.api)
+            self.assertTrue(all(r.status=='成功' for r in rows),[r.message for r in rows])
+            if formats==FORMATS:
+                files=list(root.glob('*.pretty/*.kicad_mod'))
+                self.assertEqual(len(files),1)
+                pads=children(sexpr(files[0].read_bytes()),'pad')
+                self.assertEqual(sum(p[2]=='thru_hole' for p in pads),4)
+            else:
+                target=next(root.glob('*.PcbLib'))
+                original=target.read_bytes()
+                library=LibraryIndex(original,'PCBLIB')
+                try:
+                    self.assertEqual(len(library.names),1)
+                finally:
+                    library.ole.close()
+                self.assertEqual(sum(kind==3 for kind,_ in pcb(original)[2]),4)
+                result=backend.download_part('C900002',backend.Options(root,('PCBLIB',),
+                    append_mode=True,pcblib_target=str(target)),self.api)
+                self.assertEqual(result.status,'成功',result.message)
+                library=LibraryIndex(target.read_bytes(),'PCBLIB')
+                try:
+                    self.assertEqual(len(library.names),1)
+                finally:
+                    library.ole.close()
+                self.assertEqual(sum(kind==3 for kind,_ in pcb(target.read_bytes())[2]),4)
+
     def test_failed_replacement_restores_old_symbols_footprints_and_removed_members(self):
         original_replace = library_files.replace_file
         for error in (OSError('disk error'),Cancelled()):

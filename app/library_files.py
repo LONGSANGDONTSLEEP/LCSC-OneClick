@@ -10,6 +10,7 @@ import tempfile
 
 from app_paths import temporary_directory, replace_file
 from errors import DownloadError
+from app_logging import log_event, traced
 
 
 def _move_new(source, target):
@@ -96,6 +97,8 @@ def commit_library(root, artifacts, check_cancelled=lambda: None, *, overwrite=F
     return [(artifact, str(target)) for artifact, target in committed]
 
 
+@traced('library.replace', lambda root, artifacts, *a: {'count': len(artifacts),
+        'formats': sorted({a.format for a in artifacts})}, level='INFO')
 def _replace_libraries(root, artifacts, check):
     """Replace each selected library as a set; restore old contents on failure.
 
@@ -158,6 +161,7 @@ def _replace_libraries(root, artifacts, check):
             backup.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(path, backup)
             before[path] = (backup, digest(backup))
+        log_event('INFO', 'library.replacement_prepared', new_files=len(artifacts), previous_files=len(before))
         journal, made_dirs, removed_dirs = [], [], []
         def parents(path):
             missing = []
@@ -198,7 +202,9 @@ def _replace_libraries(root, artifacts, check):
                 checked(directory).rmdir()
                 removed_dirs.append(directory)
             check()
+            log_event('INFO', 'library.replacement_completed', files=len(paths), removed_files=len(old_files - selected))
         except BaseException as exc:
+            log_event('INFO', 'library.rollback_started', changed_files=len(journal), cancelled=type(exc).__name__ == 'Cancelled')
             failures = []
             for path,written_hash in reversed(journal):
                 try:
@@ -227,7 +233,9 @@ def _replace_libraries(root, artifacts, check):
                     pass
             if failures:
                 preserve_recovery = True
+                log_event('ERROR', 'library.rollback_failed', failure_count=len(failures), recovery_preserved=True)
                 raise DownloadError('导出失败，部分文件无法回滚；原库备份保留在：' + str(staging/'before')) from exc
+            log_event('INFO', 'library.rollback_completed', restored_files=len(journal))
             raise
     finally:
         # Delete only this operation's verified, application-owned staging tree.

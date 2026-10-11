@@ -196,9 +196,11 @@ def footprint_signature(streams):
                 records = []
                 while reader.offset < len(reader.data):
                     kind = reader.take(1)[0]
-                    if kind not in (1, 2, 4, 5, 11):
+                    if kind not in (1, 2, 3, 4, 5, 11):
                         return None
                     blocks = [reader.block() for _ in range(6 if kind == 2 else 2 if kind == 5 else 1)]
+                    if kind == 3 and (blocks[0][0] or len(blocks[0][1]) != 31):
+                        return None  # Only our verified simple through-via layout.
                     if kind == 2:
                         flag, body = blocks[4]
                         if flag or len(body) != 202:

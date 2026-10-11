@@ -1,0 +1,19 @@
+{
+  "@type": "Component",
+  "part": "C1",
+  "schema_version": "1.1",
+  "required_features": ["local-mm-y-up", "through-vias"],
+  "footprint": {
+    "@type": "Footprint",
+    "name": "HistoricalVia",
+    "items": [
+      {"@type": "Pad", "number": "1", "size": {"@type": "Point", "x": {"@decimal": "2"}, "y": {"@decimal": "2"}}},
+      {
+        "@type": "Via",
+        "center": {"@type": "Point", "x": {"@decimal": "0.5"}, "y": {"@decimal": "0.5"}},
+        "diameter": {"@decimal": "0.6"},
+        "drill": {"@decimal": "0.3"}
+      }
+    ]
+  }
+}

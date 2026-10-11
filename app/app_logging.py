@@ -156,6 +156,12 @@ def exception_details(error):
             frames.append({'file': Path(code.co_filename).name, 'function': code.co_name, 'line': trace.tb_lineno})
             trace = trace.tb_next
         details = {'error': type(current).__name__, 'frames': frames[-24:]}
+        # Explicit conversion codes identify unsupported primitives without
+        # recording exception text, raw source records, paths or source nets.
+        for key in ('eda_code', 'eda_domain', 'eda_primitive', 'eda_source_id'):
+            value = getattr(current, key, None)
+            if isinstance(value, str) and re.fullmatch(r'[A-Za-z0-9_.-]{1,80}', value):
+                details[key] = value
         for key in ('errno', 'winerror', 'code', 'service_code', 'status', 'verify_code', 'lineno', 'colno', 'expected'):
             value = getattr(current, key, None)
             if type(value) is int:

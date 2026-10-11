@@ -7,9 +7,9 @@ import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from PySide6.QtCore import Qt, QEvent, QPoint, QPointF
+from PySide6.QtCore import Qt, QEvent, QPoint, QPointF, QObject
 from PySide6.QtGui import QWheelEvent
-from PySide6.QtTest import QTest
+from PySide6.QtTest import QTest, QSignalSpy
 from PySide6.QtWidgets import QApplication
 from app_settings import Preferences
 from app_theme import theme_manager
@@ -146,6 +146,44 @@ class MaterialUiTests(unittest.TestCase):
             w.lib_merge_box.setChecked(False)
             QTest.qWait(80)
             self.assertGreaterEqual(top(w.export_card),top(w.workspace_splitter)+w.workspace_splitter.height()+12)
+
+    def test_merge_toggle_paints_only_final_card_geometry(self):
+        w=self.window
+        frames=[]
+        class Observer(QObject):
+            def eventFilter(self,widget,event):
+                if event.type() == QEvent.Paint:
+                    frames.append((widget.geometry().getRect(),widget.mapTo(w,QPoint()).y()))
+                return False
+        observer=Observer(w)
+        w.export_card.installEventFilter(observer)
+        try:
+            for language,size,width,height in (('zh_CN',13,1380,880),('en_US',24,1060,740)):
+                w.apply_preferences(Preferences(language=language,font_size=size))
+                w.resize(width,height)
+                for target in ('ad','kicad'):
+                    w.export_target_box.setCurrentIndex(w.export_target_box.findData(target))
+                    w.schlib_box.setChecked(True);w.pcblib_box.setChecked(True)
+                    w.kicad_symbol_box.setChecked(True);w.kicad_footprint_box.setChecked(True)
+                    box=w.lib_merge_box if target=='ad' else w.kicad_lib_merge_box
+                    # Discard the normal mouse-down paint of the previous state.
+                    box.toggled.connect(frames.clear)
+                    for _ in range(4):
+                        w.content_scroll.ensureWidgetVisible(box)
+                        QTest.qWait(60)
+                        before=box.isChecked()
+                        QTest.mouseClick(box,Qt.LeftButton)
+                        QTest.qWait(120)
+                        self.assertNotEqual(box.isChecked(),before,(language,size,target))
+                        self.assertTrue(frames)
+                        self.assertEqual(set(frames),{(w.export_card.geometry().getRect(),w.export_card.mapTo(w,QPoint()).y())},
+                            (language,size,target,box.isChecked(),frames))
+                    box.toggled.disconnect(frames.clear)
+            idle=QSignalSpy(w.export_layout_timer.timeout)
+            QTest.qWait(100)
+            self.assertEqual(idle.count(),0,'Layout must stop scheduling work after it settles')
+        finally:
+            w.export_card.removeEventFilter(observer)
 
 
 if __name__ == '__main__':

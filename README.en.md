@@ -19,7 +19,7 @@
 
 LCSC3D is a portable Windows tool for hardware development, PCB design and mechanical fit checks. It combines storefront search, mainland account favorites, model downloads, Altium Designer library export and four preview modes in one application. Download and run `LCSC3D.exe`; no Python installation is required. Exporting AD libraries does not require Altium Designer to be installed either.
 
-**Current development version: 2.3.0-demo.3 (local feature preview)** · **[Download the published Windows version](https://github.com/Travelerrrrrr/LCSC3D/releases/latest/download/LCSC3D.exe)** · [Full source package](https://github.com/Travelerrrrrr/LCSC3D/releases/latest/download/LCSC3D.zip) · [Release notes (Chinese)](docs/releases/v2.3.0-demo.3.md) · [Report an issue](https://github.com/Travelerrrrrr/LCSC3D/issues)
+**Current development version: 2.3.0-demo.4 (local feature preview)** · **[Download the published Windows version](https://github.com/Travelerrrrrr/LCSC3D/releases/latest/download/LCSC3D.exe)** · [Full source package](https://github.com/Travelerrrrrr/LCSC3D/releases/latest/download/LCSC3D.zip) · [Release notes (Chinese)](docs/releases/v2.3.0-demo.4.md) · [Report an issue](https://github.com/Travelerrrrrr/LCSC3D/issues)
 
 **Custom append destinations, library names and direct project import.** Version 2.2.2 supports separate 3D, SchLib and PcbLib folders for project exports, a separate part folder, and a direct library-import button in Append settings. The latest local build is `outputs/LCSC3D.exe`; download links still point to the published version.
 
@@ -29,7 +29,7 @@ Screenshots show the actual application, using 2.2.1 except for the updated Appe
 
 ## KiCad export preview
 
-Version 2.3.0-demo.3 fixes reversed pin paths in AD/KiCad files and previews, overlapping result text and export-panel spacing. KiCad merge controls now follow the AD workflow, with separate symbol/footprint names, optional individual copies and matching model-folder rules. A versioned EDA intermediate model preserves source geometry, optional extensions and explicit target capabilities for future adapters.
+Version 2.3.0-demo.4 fixes AD/KiCad exports for footprints containing vias, including C31966. IR 1.1 preserves vias as distinct objects and reads existing 1.0 documents. AD writes native vias; KiCad footprints retain their geometry as unnumbered plated through-holes. Merge controls settle their layout before painting. KiCad conversion, replacement, rollback and per-format logs are now complete for the tested workflows; log collection, clearing and crash capture were audited using isolated profiles. See the [logging audit (Chinese)](docs/日志覆盖审查.md).
 
 Select **Export to → KiCad**, choose **Symbols / Footprints**, enable **Lib → Merge**, and independently configure symbol and footprint merging, names and individual copies. Add the exported `.kicad_sym` file and `.pretty` directory through KiCad's library managers. The footprint library nickname must match the exported name, such as `LCSC3D` or `LCSC3D_C20197`.
 

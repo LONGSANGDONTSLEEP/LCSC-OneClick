@@ -5,7 +5,7 @@ import math
 import struct
 import uuid
 
-from eda_ir import D, Point, Pin, Pad, require_domain, check_extensions, graphic_paths, decimal, xy
+from eda_ir import D, Point, Pin, Pad, Via, require_domain, check_extensions, graphic_paths, decimal, xy
 from eda_geometry import polygon_anchor, path_points
 from errors import DownloadError
 from symbol_style import symbol_style as resolve_style
@@ -239,6 +239,9 @@ def pcb(component, check, *, merged=False, footprint_name=None):
     for item in footprint.items:
         check()
         check_extensions(item)
+        if isinstance(item, Via):
+            records.append(a._via_record(point(item.center), raw(item.diameter), raw(item.drill)))
+            continue
         target_layer = layer(item.layer)
         if isinstance(item, Pad):
             if target_layer not in (1, 32, 74):

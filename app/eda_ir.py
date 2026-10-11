@@ -15,10 +15,10 @@ import math
 import types
 from typing import get_args, get_origin, get_type_hints
 
-from errors import DownloadError
+from errors import DownloadError, EdaError
 
-SCHEMA_VERSION = '1.0'
-CORE_FEATURES = frozenset({'local-mm-y-up', 'symbol-units', 'pad-copper-drill'})
+SCHEMA_VERSION = '1.1'
+CORE_FEATURES = frozenset({'local-mm-y-up', 'symbol-units', 'pad-copper-drill', 'through-vias'})
 # Open vocabulary: readers preserve future/source-specific values verbatim.
 # `power` records an undirected source declaration; it is not `power_in`.
 PIN_ELECTRICAL_TYPES = frozenset({'unspecified', 'input', 'output', 'bidirectional',
@@ -94,6 +94,7 @@ class Graphic(Record):
     visible: bool = True
     mirrored: bool = False
     region_type: str = 'solid'
+    source_kind: str = ''  # Diagnostic provenance; targets never parse raw records.
 
 
 @dataclass(frozen=True)
@@ -135,6 +136,16 @@ class Pad(Record):
 
 
 @dataclass(frozen=True)
+class Via(Record):
+    center: Point = field(default_factory=Point)
+    diameter: Decimal = ZERO
+    drill: Decimal = ZERO
+    start_layer: str = 'top_copper'
+    end_layer: str = 'bottom_copper'
+    net: str = ''  # Source net label; library export does not invent a pin number.
+
+
+@dataclass(frozen=True)
 class Property(Record):
     name: str = ''
     value: str = ''
@@ -158,7 +169,7 @@ class Symbol(Record):
 @dataclass(frozen=True)
 class Footprint(Record):
     name: str = ''
-    items: tuple[Pad | Graphic, ...] = ()
+    items: tuple[Pad | Via | Graphic, ...] = ()
     licence: str = ''
 
 
@@ -178,6 +189,7 @@ class Diagnostic(Record):
     severity: str = 'error'
     code: str = ''
     message: str = ''
+    primitive: str = ''
 
 
 @dataclass(frozen=True)
@@ -198,7 +210,7 @@ class Component(Record):
 
 
 RECORD_TYPES = {t.__name__: t for t in (
-    Extension, Point, Stroke, TextStyle, Graphic, Pin, Pad, Property, SymbolUnit,
+    Extension, Point, Stroke, TextStyle, Graphic, Pin, Pad, Via, Property, SymbolUnit,
     Symbol, Footprint, Model3D, Diagnostic, Component)}
 
 
@@ -298,9 +310,12 @@ def require_domain(component, domain):
     """Validate only requested content; a bad symbol must not block a footprint."""
     validate(component)
     value = getattr(component, domain)
-    error = next((d.message for d in component.diagnostics if d.domain == domain and d.severity == 'error'), '')
+    diagnostic = next((d for d in component.diagnostics if d.domain == domain and d.severity == 'error'), None)
+    error = diagnostic.message if diagnostic else ''
     if value is None or error:
-        raise DownloadError(error or ('官方库中没有可导出的' + ('符号' if domain == 'symbol' else '封装')))
+        raise EdaError(error or ('官方库中没有可导出的' + ('符号' if domain == 'symbol' else '封装')),
+            code=diagnostic.code if diagnostic else 'missing_domain', domain=domain,
+            primitive=diagnostic.primitive if diagnostic else '', source_id=diagnostic.source_id if diagnostic else '')
     check_extensions(component)
     def inspect(record):
         if not isinstance(record, Record):
@@ -321,6 +336,15 @@ def check_extensions(value):
     for extension in value.extensions:
         if extension.required:
             raise DownloadError('导出器不支持必要扩展：' + extension.namespace)
+
+
+def check_via(via):
+    if not 0 < via.drill < via.diameter:
+        raise EdaError('过孔的孔径和铜环直径无效', code='invalid_via_dimensions',
+                       domain='footprint', primitive='VIA', source_id=via.source_id)
+    if (via.start_layer, via.end_layer) != ('top_copper', 'bottom_copper'):
+        raise EdaError('当前导出器仅支持贯穿顶层到底层的过孔', code='unsupported_via_span',
+                       domain='footprint', primitive='VIA', source_id=via.source_id)
 
 
 def xy(point):

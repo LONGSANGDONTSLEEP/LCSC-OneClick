@@ -46,7 +46,7 @@ from branding import BrandLogo
 from international_store import storefront_url
 from app_paths import data_directory, configure_runtime_paths, updates_directory
 
-VERSION = '2.3.0-demo.3'
+VERSION = '2.3.0-demo.4'
 DOWNLOAD_COLUMN, PART_COLUMN, MODEL_COLUMN, RESULT_COLUMN = range(4)
 ROOT = Path(getattr(sys, '_MEIPASS', Path(__file__).resolve().parent))
 APP_DIR = Path(sys.executable).parent if getattr(sys, 'frozen', False) else Path(__file__).resolve().parent
@@ -1380,6 +1380,7 @@ class MainWindow(FramelessMainWindow):
             self.kicad_merge_symbol_box.setChecked(True)
             self.kicad_merge_footprint_box.setChecked(True)
         self.update_merge_controls()
+        log_event('INFO', 'export.mode_changed', target='kicad', mode=self.library_mode('kicad'))
 
     def change_library_mode(self, mode, checked):
         other = self.lib_append_box if mode == 'merge' else self.lib_merge_box
@@ -1398,7 +1399,7 @@ class MainWindow(FramelessMainWindow):
             self.merge_schlib_box.setChecked(True)
             self.merge_pcblib_box.setChecked(True)
         self.update_merge_controls()
-        log_event('INFO', 'export.mode_changed', mode=self.library_mode())
+        log_event('INFO', 'export.mode_changed', target='ad', mode=self.library_mode('ad'))
 
     def append_clicked(self, checked):
         if checked:
@@ -1454,7 +1455,13 @@ class MainWindow(FramelessMainWindow):
         self.targets_summary.setText(' · '.join(summary) or ui_text('请配置已有库或 PCB 工程'))
         self.targets_summary.setToolTip('\n'.join(targets + [self.export_targets.get('project_path', '')]))
         self.update_start_button()
-        self.export_layout_timer.start(0)
+        if hasattr(self, 'export_card'):
+            # Invalidate the nested KiCad row hint only when controls change;
+            # doing this in the queued resize handler would schedule itself.
+            self.kicad_options.layout().invalidate()
+            self.kicad_options.updateGeometry()
+            self.export_card.layout().invalidate()
+            self.adjust_export_layout()
 
     def adjust_export_layout(self):
         def minimum_height(widget):
@@ -1462,13 +1469,28 @@ class MainWindow(FramelessMainWindow):
             layout = widget.layout()
             wrapped = layout.minimumHeightForWidth(widget.contentsRect().width()) if layout else -1
             return max(widget.minimumSizeHint().height(), wrapped + margins.top() + margins.bottom())
-        height = max(minimum_height(self.workspace_splitter.widget(i)) for i in range(self.workspace_splitter.count()))
-        if self.workspace_splitter.minimumHeight() != height:
-            self.workspace_splitter.setMinimumHeight(height)
-        height = minimum_height(self.export_card)
-        if self.export_card.minimumHeight() != height:
-            self.export_card.setMinimumHeight(height)
-        self.content_scroll.widget().layout().activate()
+        # Finish card, canvas and scrollbar geometry before painting a new mode.
+        # A queued minimum-height update used to paint a compressed intermediate
+        # layout, then jump again when QScrollArea resized its canvas.
+        canvas = self.content_scroll.widget()
+        enabled = self.content_scroll.updatesEnabled()
+        self.content_scroll.setUpdatesEnabled(False)
+        try:
+            for _ in range(3):  # A scrollbar can change the width and wrapped height.
+                before = (canvas.size(), self.workspace_splitter.minimumHeight(), self.export_card.minimumHeight())
+                height = max(minimum_height(self.workspace_splitter.widget(i)) for i in range(self.workspace_splitter.count()))
+                self.workspace_splitter.setMinimumHeight(height)
+                self.export_card.setMinimumHeight(minimum_height(self.export_card))
+                canvas.layout().activate()
+                height = max(self.content_scroll.viewport().height(), minimum_height(canvas))
+                width = max(self.content_scroll.viewport().width(), canvas.minimumSizeHint().width(), canvas.minimumWidth())
+                canvas.resize(width, height)
+                canvas.layout().activate()
+                QApplication.sendEvent(self.content_scroll, QEvent(QEvent.LayoutRequest))
+                if before == (canvas.size(), self.workspace_splitter.minimumHeight(), self.export_card.minimumHeight()):
+                    break
+        finally:
+            self.content_scroll.setUpdatesEnabled(enabled)
         available = self.screen().availableGeometry()
         self.setMinimumSize(min(1060, available.width()), min(740, available.height()))
 
