@@ -1,6 +1,13 @@
 """English UI catalog. Keys remain the Simplified Chinese source messages."""
 
 ENGLISH = {
+    '嘉立创风格': 'JLC style',
+    'AD 风格': 'AD style',
+    '符号风格': 'Symbol style',
+    '统一符号外观，应用于预览和 SchLib 导出；保留图形结构与引脚信息': 'Apply symbol appearance to preview and SchLib export; retain geometry and pin information',
+    '预览与 SchLib 导出': 'Preview and SchLib export',
+    '正在显示器件预览…': 'Displaying component preview…',
+    '{0} · {1} 个引脚 · 滚轮缩放，拖动平移': '{0} · {1} pins · Scroll to zoom, drag to pan',
     '当前位置': 'Location',
     '目录': 'Folder',
     '文件名': 'File name',

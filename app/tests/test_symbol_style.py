@@ -1,0 +1,155 @@
+"""Appearance changes must leave electrical and geometric data intact."""
+import copy
+import json
+from pathlib import Path
+import sys
+import unittest
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from altium import export_schlib, export_linked_schlib
+from altium_inspect import schematic
+import backend
+from library_merge import LibraryIndex
+from library_preview import build_library_preview, styled_symbol
+from symbol_style import AD_STYLE, normalize_symbol_style
+from test_export_modes import ExportFixture
+from test_official_altium import cases
+from test_library_preview import fixture
+
+
+APPEARANCE = {'COLOR', 'AREACOLOR', 'LINEWIDTH', 'FONTID', 'NAME_CUSTOMFONTID',
+              'DESIGNATOR_CUSTOMFONTID', 'NAME_CUSTOMCOLOR', 'DESIGNATOR_CUSTOMCOLOR', 'UNIQUEID'}
+
+
+def semantics(records):
+    return [{k: v for k, v in row.items() if k not in APPEARANCE} for row in records]
+
+
+def assert_ad_fonts(test, header, records):
+    for row in records:
+        for key in ('FONTID', 'NAME_CUSTOMFONTID', 'DESIGNATOR_CUSTOMFONTID'):
+            if key in row:
+                test.assertEqual(header['FONTNAME' + row[key]], 'Times New Roman')
+                test.assertEqual(header['SIZE' + row[key]], '8')
+        if row.get('RECORD') == '2':
+            test.assertEqual(row['COLOR'], '0')
+            test.assertEqual(row['NAME_CUSTOMCOLOR'], '8388608')
+            test.assertEqual(row['DESIGNATOR_CUSTOMCOLOR'], '8388608')
+        if row.get('RECORD') in ('6', '7', '8', '10', '14'):
+            test.assertEqual(row['COLOR'], '128')
+            test.assertEqual(row['LINEWIDTH'], '1')
+            if 'AREACOLOR' in row:
+                test.assertIn(row['AREACOLOR'], ('128', '11599871'))
+
+
+class SymbolStyleTests(unittest.TestCase):
+    def test_missing_and_invalid_preferences_use_original_style(self):
+        for value in (None, '', 'AD', 'unknown', {}, [], 123):
+            self.assertEqual(normalize_symbol_style(value), 'jlc')
+            self.assertEqual(backend.Options(Path('.'), symbol_style=value).symbol_style, 'jlc')
+        self.assertEqual(normalize_symbol_style('ad'), 'ad')
+
+    def test_transparency_pale_backgrounds_and_solid_marks_are_distinct(self):
+        for source in ('none', 'NONE', ' none '):
+            self.assertEqual(AD_STYLE.fill(source), source)
+        for source in ('#fff', '#FFFFFF', '#ffffb0'):
+            # The preset itself remains a pale background on repeated styling.
+            self.assertEqual(AD_STYLE.fill(source), '#ffffb0')
+        for source in ('#880000', '#000', '#000000'):
+            self.assertEqual(AD_STYLE.fill(source), '#800000')
+
+    def test_preview_style_does_not_mutate_source_svg_or_footprint(self):
+        data = fixture('C2040')
+        original = copy.deepcopy(data)
+        preview = build_library_preview(data, 'C2040')
+        document = styled_symbol(preview.symbols[0], 'ad')
+        self.assertEqual(document.svg, preview.symbols[0].svg)
+        self.assertEqual(document.count, 57)
+        self.assertEqual(document.symbol_style, 'ad')
+        self.assertEqual(preview.symbols[0].symbol_style, 'jlc')
+        self.assertEqual(preview.footprint.symbol_style, 'jlc')
+        self.assertEqual(styled_symbol(document, 'jlc'), preview.symbols[0])
+        self.assertEqual(data, original)
+
+
+@unittest.skipUnless(sys.platform == 'win32', 'Native AD libraries')
+class SymbolLibraryStyleTests(unittest.TestCase):
+    def test_all_official_symbols_keep_geometry_pins_units_and_parameters(self):
+        samples = cases()
+        for part in ('C23922', 'C8734'):
+            data = json.loads((Path(__file__).parent / 'fixtures' / (part + '.json')).read_text('utf-8'))
+            samples.append(dict(part=part, data=data))
+        for sample in samples:
+            with self.subTest(part=sample['part']):
+                original = copy.deepcopy(sample['data'])
+                before = schematic(export_schlib(sample['data'], sample['part']))
+                after = schematic(export_schlib(sample['data'], sample['part'], symbol_style='ad'))
+                self.assertEqual(semantics(before[1]), semantics(after[1]))
+                self.assertEqual([{k: v for k, v in p.items() if k != 'color'} for p in before[2]],
+                                 [{k: v for k, v in p.items() if k != 'color'} for p in after[2]])
+                self.assertEqual(before[0]['PARTCOUNT0'], after[0]['PARTCOUNT0'])
+                assert_ad_fonts(self, after[0], after[1])
+                self.assertEqual(sample['data'], original)
+
+    def test_original_style_is_explicitly_selectable_after_ad_export(self):
+        data = cases()[0]['data']
+        before = schematic(export_schlib(data, 'C2040'))
+        export_schlib(data, 'C2040', symbol_style='ad')
+        after = schematic(export_schlib(data, 'C2040', symbol_style='jlc'))
+        strip = lambda rows: [{k: v for k, v in row.items() if k != 'UNIQUEID'} for row in rows]
+        self.assertEqual(strip(before[1]), strip(after[1]))
+        self.assertEqual(before[2], after[2])
+
+    def test_linked_individual_symbol_uses_style_and_actual_footprint_name(self):
+        data = cases()[0]['data']
+        header, rows, _ = schematic(export_linked_schlib(
+            data, 'C2040', lambda: None, symbol_style='ad', footprint_name='ExistingFootprint'))
+        assert_ad_fonts(self, header, rows)
+        self.assertEqual(next(row['MODELNAME'] for row in rows if row.get('RECORD') == '45'),
+                         'ExistingFootprint')
+
+
+@unittest.skipUnless(sys.platform == 'win32', 'Native AD libraries')
+class SymbolStyleExportTests(ExportFixture):
+    def test_style_reaches_individual_merged_deferred_and_project_exports(self):
+        for mode in ('individual', 'merge', 'deferred', 'project'):
+            with self.subTest(mode=mode):
+                root = self.root / mode
+                extra = {}
+                if mode == 'project':
+                    extra = dict(append_mode=True, project_path=str(self.project(root / 'project')),
+                                 keep_individual=True)
+                options = backend.Options(root, ('SCHLIB', 'PCBLIB'),
+                    merge_schlib=mode == 'merge', merge_pcblib=mode in ('merge', 'deferred'),
+                    keep_schlib=True, keep_pcblib=True, symbol_style='ad', **extra)
+                results = backend.download_batch(['C2040', 'C20197'], options, api=self.api)
+                self.assertEqual([r.status for r in results], ['成功', '成功'])
+                files = {Path(f) for r in results for f in r.files if f.endswith('.SchLib')}
+                self.assertTrue(files)
+                for file in files:
+                    payload = file.read_bytes()
+                    index = LibraryIndex(payload, 'SCHLIB')
+                    try:
+                        sections = list(index.sections.values())
+                    finally:
+                        index.ole.close()
+                    for section in sections:
+                        header, rows, _ = schematic(payload, section)
+                        assert_ad_fonts(self, header, rows)
+
+    def test_append_keeps_existing_symbol_styles_and_merges_font_indices(self):
+        targets = self.targets(self.root / 'append', ('SCHLIB', 'PCBLIB'))
+        original = schematic(self.originals['SCHLIB'], 'C2765186_Symbol')
+        options = backend.Options(self.root, ('SCHLIB', 'PCBLIB'), append_mode=True,
+                                  symbol_style='ad', **targets)
+        results = backend.download_batch(['C2040', 'C20197'], options, api=self.api)
+        self.assertEqual([r.status for r in results], ['成功', '成功'])
+        payload = options.merged_paths()['SCHLIB'].read_bytes()
+        self.assertEqual(schematic(payload, 'C2765186_Symbol')[1:], original[1:])
+        for part in ('C2040', 'C20197'):
+            header, rows, _ = schematic(payload, part + '_Symbol')
+            assert_ad_fonts(self, header, rows)
+
+
+if __name__ == '__main__':
+    unittest.main()

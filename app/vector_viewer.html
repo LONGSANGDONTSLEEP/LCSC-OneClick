@@ -56,7 +56,49 @@ html, body { margin:0; width:100%; height:100%; overflow:hidden; }
     }
     if (labels.childElementCount) svg.appendChild(labels);
   }
-  window.showSvgDocument = (encoded, background, revision) => {
+  function applySymbolStyle(preset) {
+    if (!preset) return;
+    const elements = [...svg.querySelectorAll('rect,circle,ellipse,polyline,line,polygon,path,text,tspan')];
+    // Read computed values before changing any ancestor. This respects the
+    // official SVG's inline/inherited styles, CSS classes and hidden pins.
+    const items = elements.map(node => {
+      const style = getComputedStyle(node);
+      return {node, fill:style.fill, stroke:style.stroke};
+    });
+    const bounds = svg.viewBox.baseVal;
+    const light = fill => {
+      const rgb = fill.match(/^rgba?\(\s*([\d.]+)[, ]+([\d.]+)[, ]+([\d.]+)/i);
+      return rgb && rgb.slice(1, 4).map(Number).reduce((a, b) => a + b, 0) / 3 >= preset.lightFillThreshold;
+    };
+    for (const {node, fill, stroke} of items) {
+      // The first full-canvas rect is a preview background, not a symbol body.
+      if (node.parentElement === svg && node.localName === 'rect' && stroke === 'none'
+          && Number(node.getAttribute('x') || 0) === bounds.x
+          && Number(node.getAttribute('y') || 0) === bounds.y
+          && Number(node.getAttribute('width')) === bounds.width
+          && Number(node.getAttribute('height')) === bounds.height) continue;
+      if (node.hasAttribute('c_pindot')) continue; // Editor connection hotspots.
+      const pin = !!node.closest('[c_partid="part_pin"]');
+      const set = (key, value) => node.style.setProperty(key, value, 'important');
+      if (node.localName === 'text' || node.localName === 'tspan') {
+        set('font-family', preset.font);
+        set('font-size', preset.fontSize + 'px');
+        set('font-weight', 'normal'); set('font-style', 'normal');
+        if (fill !== 'none') set('fill', preset.text);
+        if (stroke !== 'none') set('stroke', preset.text);
+      } else {
+        if (stroke !== 'none') {
+          set('stroke', pin ? preset.pin : preset.outline);
+          set('stroke-width', preset.lineWidth);
+        }
+        if (fill !== 'none') {
+          // Pale backgrounds stay pale; filled arrows/polarity marks stay ink.
+          set('fill', light(fill) ? (pin ? '#ffffff' : preset.area) : (pin ? preset.pin : preset.outline));
+        }
+      }
+    }
+  }
+  window.showSvgDocument = (encoded, background, revision, symbolStyle = null) => {
     token = revision; drag = null; svg = null; content = null; box = null;
     canvas.classList.remove('dragging'); canvas.replaceChildren();
     document.body.style.background = background;
@@ -80,12 +122,21 @@ html, body { margin:0; width:100%; height:100%; overflow:hidden; }
       svg.setAttribute('width', '100%'); svg.setAttribute('height', '100%');
       svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
       canvas.appendChild(svg);
+      applySymbolStyle(symbolStyle);
       const bounds = svg.viewBox.baseVal;
       const b = bounds.width > 0 && bounds.height > 0 ? bounds : svg.getBBox();
       if (![b.x, b.y, b.width, b.height].every(Number.isFinite) || b.width <= 0 || b.height <= 0) {
         throw new Error('图形范围无效');
       }
       content = {x:b.x, y:b.y, width:b.width, height:b.height};
+      if (symbolStyle) {
+        // A new font can extend beyond the original SVG's viewport.
+        const painted = svg.getBBox();
+        const right = Math.max(content.x + content.width, painted.x + painted.width);
+        const bottom = Math.max(content.y + content.height, painted.y + painted.height);
+        content.x = Math.min(content.x, painted.x); content.y = Math.min(content.y, painted.y);
+        content.width = right - content.x; content.height = bottom - content.y;
+      }
       // The storefront also overlays numbers from the SVG's pad attributes.
       addPadNumbers();
       window.fitSvg();

@@ -24,7 +24,8 @@ from shiboken6 import isValid
 from backend import (Cancelled, DownloadError, NetworkApi, Options, Result, download_batch,
                      get_component_metadata, parse_part_numbers, import_existing_libraries)
 from model3d import model_reference, read_obj
-from library_preview import build_library_preview, VectorPreviewView, SYMBOL_BACKGROUND, FOOTPRINT_BACKGROUND
+from library_preview import build_library_preview, styled_symbol, VectorPreviewView, SYMBOL_BACKGROUND, FOOTPRINT_BACKGROUND
+from symbol_style import SYMBOL_STYLES, normalize_symbol_style
 from update_ui import UpdateDialog, StartupUpdateCheck
 from updater import acknowledge_update, cleanup_updates, launch_update
 from favorites import FavoritesDialog, normalize_items
@@ -617,6 +618,19 @@ class MainWindow(FramelessMainWindow):
         self.symbol_unit_box.hide()
         preview_head.addWidget(self.symbol_unit_box)
         preview_layout.addLayout(preview_modes)
+        style_row = QHBoxLayout()
+        style_row.addWidget(label(ui_text('符号风格'), 'muted'))
+        self.symbol_style_box = QComboBox()
+        self.symbol_style_box.setAccessibleName(ui_text('符号风格'))
+        self.symbol_style_box.setToolTip(ui_text('统一符号外观，应用于预览和 SchLib 导出；保留图形结构与引脚信息'))
+        for title, value in SYMBOL_STYLES:
+            self.symbol_style_box.addItem(ui_text(title), value)
+        self.symbol_style_box.currentIndexChanged.connect(self.symbol_style_changed)
+        style_row.addWidget(self.symbol_style_box)
+        style_hint = label(ui_text('预览与 SchLib 导出'), 'muted')
+        style_hint.setWordWrap(True)
+        style_row.addWidget(style_hint, 1)
+        preview_layout.addLayout(style_row)
         self.preview_caption = label(ui_text('选择左侧列表中的器件'), 'muted')
         self.preview_caption.setWordWrap(True)
         preview_layout.addWidget(self.preview_caption)
@@ -730,6 +744,10 @@ class MainWindow(FramelessMainWindow):
         self.merge_pcblib_box.setChecked(settings.get('merge_pcblib') is True)
         self.keep_schlib_box.setChecked(settings.get('keep_schlib') is True)
         self.keep_pcblib_box.setChecked(settings.get('keep_pcblib') is True)
+        self.symbol_style_box.blockSignals(True)
+        self.symbol_style_box.setCurrentIndex(self.symbol_style_box.findData(
+            normalize_symbol_style(settings.get('symbol_style'))))
+        self.symbol_style_box.blockSignals(False)
         self.export_targets = {key: settings[key] if isinstance(settings.get(key), str) else ''
                                for key in APPEND_TEXT_KEYS}
         legacy_append = any(self.export_targets[key] for key in ('schlib_target', 'pcblib_target', 'project_path'))
@@ -766,6 +784,7 @@ class MainWindow(FramelessMainWindow):
                 'schlib_name': self.schlib_name_input.text(), 'pcblib_name': self.pcblib_name_input.text(),
                 'keep_schlib': self.keep_schlib_box.isChecked(), 'keep_pcblib': self.keep_pcblib_box.isChecked(),
                 'library_mode': self.library_mode(),
+                'symbol_style': self.symbol_style_box.currentData(),
                 **self.export_targets,
                 **preferences.to_mapping()})
             return True
@@ -1208,6 +1227,7 @@ class MainWindow(FramelessMainWindow):
 
     def set_running(self, running):
         self.batch_running = running
+        self.symbol_style_box.setEnabled(not running)
         if self.settings_dialog is not None:
             self.settings_dialog.backup_panel.refresh_buttons()
         if self.favorites_dialog:
@@ -1326,6 +1346,7 @@ class MainWindow(FramelessMainWindow):
                        self.schlib_name_input.text(), self.pcblib_name_input.text(),
                        merge and self.keep_schlib_box.isChecked(), merge and self.keep_pcblib_box.isChecked(),
                        append_mode=self.lib_append_box.isChecked(),
+                       symbol_style=self.symbol_style_box.currentData(),
                        **(self.export_targets if self.lib_append_box.isChecked() else {}))
 
     def start_batch(self):
@@ -1725,6 +1746,7 @@ class MainWindow(FramelessMainWindow):
                 self.symbol_unit_part = part
             self.symbol_unit_box.setVisible(len(preview.symbols) > 1)
             document = preview.symbols[max(0, self.symbol_unit_box.currentIndex())]
+            document = styled_symbol(document, self.symbol_style_box.currentData())
             view, label = self.symbol_view, ui_text('符号')
         else:
             self.symbol_unit_box.hide()
@@ -1749,7 +1771,17 @@ class MainWindow(FramelessMainWindow):
         if status == 'ready':
             label, unit = (ui_text('符号'), ui_text('引脚')) if self.preview_mode == 'symbol' else (ui_text('封装'), ui_text('焊盘'))
             message = ui_message('商城官方 SVG · {0} · {1} 个{2} · 滚轮缩放，拖动平移', label, view.document.count, unit)
+            if self.preview_mode == 'symbol':
+                message = ui_message('{0} · {1} 个引脚 · 滚轮缩放，拖动平移',
+                                     ui_text('AD 风格' if view.document.symbol_style == 'ad' else '嘉立创风格'),
+                                     view.document.count)
         self.on_preview_state(status, message)
+
+    def symbol_style_changed(self, index):
+        if self.preview_mode == 'symbol' and self.current_preview in self.library_cache:
+            self.display_library_preview(self.current_preview, self.library_cache[self.current_preview])
+        self.save_settings()
+        log_event('INFO', 'preview.symbol_style_changed', symbol_style=self.symbol_style_box.currentData())
 
     def show_symbol_unit(self, index):
         if self.preview_mode == 'symbol' and self.current_preview in self.library_cache:
@@ -1946,6 +1978,7 @@ def main():
     parser.add_argument('--self-test', metavar='FOLDER', help=argparse.SUPPRESS)
     parser.add_argument('--self-test-ad', metavar='FOLDER', help=argparse.SUPPRESS)
     parser.add_argument('--self-test-ad-parts', default='C2765186', help=argparse.SUPPRESS)
+    parser.add_argument('--self-test-symbol-style', choices=('jlc', 'ad'), default='jlc', help=argparse.SUPPRESS)
     parser.add_argument('--self-test-ad-merge', action='store_true', help=argparse.SUPPRESS)
     parser.add_argument('--self-test-ad-integrate', action='store_true', help=argparse.SUPPRESS)
     parser.add_argument('--self-test-store', '--self-test-favorites', dest='self_test_favorites', metavar='FOLDER', help=argparse.SUPPRESS)
@@ -1994,6 +2027,8 @@ def main():
     install_qt_logging()
     start_crash_capture()
     window = MainWindow(settings_enabled=not bool(test_destination), update_source=update_source)
+    if test_destination:
+        window.symbol_style_box.setCurrentIndex(window.symbol_style_box.findData(args.self_test_symbol_style))
     log_event('INFO', 'application.started', **window.preferences.to_mapping())
     window.show()
     if args.self_test_local_update:
@@ -2073,6 +2108,7 @@ def main():
             window.grab().save(str(destination / ui_text('AD导出界面.png')))
             (destination / 'verification.json').write_text(json.dumps({
                 'version': VERSION, 'frozen': bool(getattr(sys, 'frozen', False)), 'success': ok,
+                'symbol_style': window.symbol_style_box.currentData(),
                 'parts': ad_test_parts,
                 'merged': args.self_test_ad_merge,
                 'integrated': args.self_test_ad_integrate,
@@ -2141,6 +2177,7 @@ def main():
                 'preview_timings': preview_timings,
                 'second_3d_ready': state['second_3d_ready'],
                 'version': VERSION, 'frozen': bool(getattr(sys, 'frozen', False)),
+                'symbol_style': window.symbol_style_box.currentData(),
                 'ids': window.ids, 'preview': window.preview_state,
                 'titles_before_download': state['titles_before_download'],
                 'download_selection': {

@@ -126,7 +126,7 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
                          {'destination', 'step', 'obj', 'schlib', 'pcblib', 'store_proxy', 'update_proxy', 'log_level', 'language', 'theme_mode', 'accent_color', 'accent_text_color', 'font_family', 'font_size', 'auto_backup',
                           'merge_schlib', 'merge_pcblib', 'schlib_name', 'pcblib_name',
                           'keep_schlib', 'keep_pcblib', 'schlib_target', 'pcblib_target', 'project_path',
-                          'library_mode', 'keep_individual', 'individual_directory', 'project_model_directory',
+                          'library_mode', 'symbol_style', 'keep_individual', 'individual_directory', 'project_model_directory',
                           'project_schlib_directory', 'project_pcblib_directory', 'project_schlib_name', 'project_pcblib_name'})
 
     def assert_stable(self, hwnd, events, geometry, maximized=False):
@@ -205,6 +205,116 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
 
     def svg_state(self, view):
         return self.evaluate(view, 'window.getSvgPreviewState()')
+
+    def test_symbol_style_switch_reuses_cache_updates_real_browser_and_export_options(self):
+        self.window.show()
+        api = SimpleNamespace(get_svg_data_of_component=lambda part: fixture(part), check_cancelled=lambda: None)
+        with patch('main.NetworkApi', return_value=api) as network:
+            self.window.preview_mode_buttons['symbol'].click()
+            self.wait_for_library()
+            original = self.window.symbol_view.document
+            geometry = "Array.from(document.querySelectorAll('g[c_partid=part_pin]'), e => [e.id,e.getAttribute('c_origin'),e.getAttribute('c_spicepin'),e.getAttribute('c_elec')])"
+            pins = self.evaluate(self.window.symbol_view, geometry)
+            self.window.symbol_style_box.setCurrentIndex(1)
+            self.wait_for_library()
+            self.assertEqual(self.window.export_options().symbol_style, 'ad')
+            self.assertEqual(self.window.symbol_view.document.symbol_style, 'ad')
+            self.assertEqual(self.evaluate(self.window.symbol_view, geometry), pins)
+            style = self.evaluate(self.window.symbol_view,
+                "(() => { const p=document.querySelector('g[c_partid=part_pin]'); const s=getComputedStyle(p.querySelector('text')); return [getComputedStyle(p.querySelector('path')).stroke,s.fill,s.fontFamily,parseFloat(s.fontSize)]; })()")
+            self.assertEqual(style[:3], ['rgb(0, 0, 0)', 'rgb(0, 0, 128)', '"Times New Roman"'])
+            self.assertAlmostEqual(style[3], 8 / 0.72, places=3)
+            from i18n import set_language
+            try:
+                set_language('en_US')
+                self.assertIn('AD style', self.window.preview_status.text())
+            finally:
+                set_language('zh_CN')
+            self.assertIn('AD 风格', self.window.preview_status.text())
+            options = self.window.export_options()
+            self.window.symbol_style_box.setCurrentIndex(0)
+            self.wait_for_library()
+            self.assertEqual(self.window.symbol_view.document, original)
+            self.assertEqual(options.symbol_style, 'ad')
+            self.assertEqual(self.window.export_options().symbol_style, 'jlc')
+            self.assertEqual(network.call_count, 1)
+            self.window.symbol_style_box.setCurrentIndex(1)
+            self.wait_for_library()
+            self.window.preview_mode_buttons['footprint'].click()
+            self.wait_for_library()
+            self.assertEqual(self.window.footprint_view.document.symbol_style, 'jlc')
+            self.assertEqual(network.call_count, 1)
+        self.window.set_running(True)
+        self.assertFalse(self.window.symbol_style_box.isEnabled())
+        self.window.set_running(False)
+        self.assertTrue(self.window.symbol_style_box.isEnabled())
+
+    def test_symbol_style_is_saved_restored_and_localized_without_changing_value(self):
+        from i18n import set_language
+        settings_path = Path(self.directory.name) / 'style-settings.json'
+        self.window.settings_enabled = True
+        try:
+            with patch.object(main, 'SETTINGS_PATH', settings_path), patch.object(main, 'LEGACY_SETTINGS_PATH', None):
+                self.window.symbol_style_box.setCurrentIndex(1)
+                self.assertEqual(json.loads(settings_path.read_text('utf-8'))['symbol_style'], 'ad')
+                self.window.symbol_style_box.blockSignals(True)
+                self.window.symbol_style_box.setCurrentIndex(0)
+                self.window.symbol_style_box.blockSignals(False)
+                self.window._restore_settings()
+                self.assertEqual(self.window.export_options().symbol_style, 'ad')
+                set_language('en_US')
+                self.assertEqual(self.window.symbol_style_box.currentText(), 'AD style')
+                self.assertEqual(self.window.export_options().symbol_style, 'ad')
+                settings_path.write_text('{"symbol_style": "invalid"}', encoding='utf-8')
+                self.window._restore_settings()
+                self.assertEqual(self.window.export_options().symbol_style, 'jlc')
+        finally:
+            self.window.settings_enabled = False
+            set_language('zh_CN')
+
+    def test_symbol_style_applies_to_all_units_and_preserves_selected_unit(self):
+        data = fixture('C20197')
+        data['result'].extend([{**data['result'][0], 'docType': 6},
+                               {**fixture('C2040')['result'][0], 'docType': 6}])
+        api = SimpleNamespace(get_svg_data_of_component=lambda part: data, check_cancelled=lambda: None)
+        self.window.show()
+        self.window.symbol_style_box.setCurrentIndex(1)
+        with patch('main.NetworkApi', return_value=api) as network:
+            self.window.preview_mode_buttons['symbol'].click()
+            self.wait_for_library()
+            self.assertEqual(self.window.symbol_view.document.symbol_style, 'ad')
+            self.window.symbol_unit_box.setCurrentIndex(1)
+            self.wait_for_library()
+            self.assertEqual(self.window.symbol_view.document.count, 57)
+            self.assertEqual(self.window.symbol_view.document.symbol_style, 'ad')
+            self.window.symbol_style_box.setCurrentIndex(0)
+            self.wait_for_library()
+            self.assertEqual(self.window.symbol_unit_box.currentIndex(), 1)
+            self.assertEqual(self.window.symbol_view.document.symbol_style, 'jlc')
+            self.assertEqual(network.call_count, 1)
+
+    def test_symbol_style_preserves_hidden_pins_transparency_background_and_solid_marks(self):
+        data = fixture('C20197')
+        data['result'][0]['svg'] = '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+          <style>.body{fill:white !important;stroke:red;stroke-width:3} .ink{fill:#880000}</style>
+          <rect id="background" width="100" height="100" fill="white" stroke="none"/>
+          <g c_para="name`example`" c_origin="0,0">
+            <rect id="body" class="body" x="20" y="20" width="60" height="60"/>
+            <path id="arrow" class="ink" d="M20 20 L30 30 L20 40 Z"/>
+            <path id="transparent" d="M20 20 L30 30" fill="none" stroke="red"/>
+            <g c_partid="part_pin" display="none"><text id="hidden" x="10" y="10">CLK</text></g>
+          </g></svg>'''
+        api = SimpleNamespace(get_svg_data_of_component=lambda part: data, check_cancelled=lambda: None)
+        self.window.show()
+        with patch('main.NetworkApi', return_value=api):
+            self.window.symbol_style_box.setCurrentIndex(1)
+            self.window.preview_mode_buttons['symbol'].click()
+            self.wait_for_library()
+        fills = self.evaluate(self.window.symbol_view,
+            "['background','body','arrow','transparent'].map(id=>getComputedStyle(document.getElementById(id)).fill)")
+        self.assertEqual(fills, ['rgb(255, 255, 255)', 'rgb(255, 255, 176)', 'rgb(128, 0, 0)', 'none'])
+        self.assertEqual(self.evaluate(self.window.symbol_view,
+            "getComputedStyle(document.getElementById('hidden').parentElement).display"), 'none')
 
     def test_official_pad_css_and_pin_text_survive_browser_rendering(self):
         self.window.show()
@@ -581,7 +691,7 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
                          {'destination', 'step', 'obj', 'schlib', 'pcblib', 'store_proxy', 'update_proxy', 'log_level', 'language', 'theme_mode', 'accent_color', 'accent_text_color', 'font_family', 'font_size', 'auto_backup',
                           'merge_schlib', 'merge_pcblib', 'schlib_name', 'pcblib_name',
                           'keep_schlib', 'keep_pcblib', 'schlib_target', 'pcblib_target', 'project_path',
-                          'library_mode', 'keep_individual', 'individual_directory', 'project_model_directory',
+                          'library_mode', 'symbol_style', 'keep_individual', 'individual_directory', 'project_model_directory',
                           'project_schlib_directory', 'project_pcblib_directory', 'project_schlib_name', 'project_pcblib_name'})
         self.window.path_input.setText(str(Path(self.directory.name) / 'models'))
         captured = []

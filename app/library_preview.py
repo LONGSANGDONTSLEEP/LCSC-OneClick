@@ -4,10 +4,11 @@ from __future__ import annotations
 import base64
 import json
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from xml.etree import ElementTree as ET
 from resources import svg_entries
+from symbol_style import symbol_style as resolve_symbol_style, normalize_symbol_style
 from app_logging import (traced, log_event, record_error, safe_part, current_context,
                          log_context, log_script_error)
 
@@ -29,6 +30,12 @@ class VectorPreview:
     name: str = ''
     count: int = 0
     error: str = ''
+    symbol_style: str = 'jlc'
+
+
+def styled_symbol(document: VectorPreview, style: str) -> VectorPreview:
+    style = normalize_symbol_style(style)
+    return document if document.symbol_style == style else replace(document, symbol_style=style)
 
 
 @dataclass(frozen=True)
@@ -153,12 +160,12 @@ class VectorPreviewView(QWebEngineView):
         self.page().diagnostic_context = self.diagnostic_context
         if document.error or not document.svg:
             return False
-        if document is self.document and self.load_state[0] != 'error':
+        if document == self.document and self.load_state[0] != 'error':
             return True
         restart_shell = self.load_state[0] == 'error' and not self.shell_ready
         self.document = document
         self.revision += 1
-        self.set_state('loading', '正在显示商城官方 SVG…')
+        self.set_state('loading', '正在显示器件预览…')
         if not self.shell_started:
             self.shell_started = True
             self.setHtml((RESOURCE_ROOT / 'vector_viewer.html').read_text(encoding='utf-8'))
@@ -171,7 +178,9 @@ class VectorPreviewView(QWebEngineView):
     def load_document(self):
         encoded = base64.b64encode(self.document.svg).decode('ascii')
         # Pass data after the small shell loads, avoiding setHtml's 2 MB limit.
-        args = ','.join(json.dumps(value) for value in (encoded, self.background, self.revision))
+        style = resolve_symbol_style(self.document.symbol_style)
+        args = ','.join(json.dumps(value) for value in (encoded, self.background, self.revision,
+                                                      style.preview() if style else None))
         self.page().runJavaScript(f'window.showSvgDocument({args})')
 
     def fit_content(self):

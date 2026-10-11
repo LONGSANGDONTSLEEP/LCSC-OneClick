@@ -19,6 +19,7 @@ from compound_storage import compound_file
 from eda_geometry import number, points, path_points, polygon_anchor, pad_outline
 from errors import DownloadError
 from model3d import document
+from symbol_style import symbol_style as resolve_symbol_style
 
 SOURCE = 'JLCEDA/EasyEDA Official Library'
 HOMEPAGES = 'https://lceda.cn/ ; https://easyeda.com/'
@@ -174,13 +175,15 @@ def _source_parameters(head):
 
 
 @traced('export.schlib', lambda data, part, *a, **kw: {'part': safe_part(part), 'format': 'SCHLIB'}, level='INFO')
-def export_schlib(data, part, check_cancelled=lambda: None):
-    header, streams = _schlib_component(data, part, check_cancelled)
+def export_schlib(data, part, check_cancelled=lambda: None, *, symbol_style='jlc'):
+    header, streams = _schlib_component(data, part, check_cancelled, symbol_style=symbol_style)
     streams['FileHeader'] = _parameters(header)
     return compound_file(streams, check_cancelled)
 
 
-def _schlib_component(data, part, check_cancelled, *, merged=False, merge_pcb=False, fonts=None, footprint_name=None):
+def _schlib_component(data, part, check_cancelled, *, merged=False, merge_pcb=False, fonts=None, footprint_name=None,
+                     symbol_style='jlc'):
+    style = resolve_symbol_style(symbol_style)
     doc = document(data.get('dataStr'))
     head = document(doc.get('head'))
     params = document(head.get('c_para'))
@@ -199,7 +202,10 @@ def _schlib_component(data, part, check_cancelled, *, merged=False, merge_pcb=Fa
     if fonts is None:
         fonts = [('Times New Roman', 8)]
     def font(family='', size=''):
-        size = number(str(size).removesuffix('pt'), 8)
+        if style:
+            family, size = style.font, style.font_size
+        else:
+            size = number(str(size).removesuffix('pt'), 8)
         pair = (family or 'Times New Roman', size)
         if pair not in fonts:
             fonts.append(pair)
@@ -215,14 +221,23 @@ def _schlib_component(data, part, check_cancelled, *, merged=False, merge_pcb=Fa
     def common(kind):
         return {'RECORD': kind, 'OwnerIndex': 0, 'OwnerPartId': owner_part, 'IsNotAccesible': 'T'}
 
-    def polyline(vertices, color, width, style='0', fill='none', closed=False):
+    def color(value, role='outline'):
+        return _color(getattr(style, role) if style else value)
+
+    def fill_color(value):
+        return _color(style.fill(value) if style else value)
+
+    def line_width(value):
+        return style.line_width if style else min(3, max(0, round(number(value, 1))))
+
+    def polyline(vertices, color, width, dash_style='0', fill='none', closed=False):
         if len(vertices) < 2:
             raise DownloadError('符号线段缺少顶点')
         record = common(7 if closed and not _unfilled(fill) else 6)
-        record.update({'LineWidth': min(3, max(0, round(number(width, 1)))), 'Color': _color(color),
-                       'LineStyle': int(number(style, 0)), 'LocationCount': len(vertices)})
+        record.update({'LineWidth': line_width(width), 'Color': _color(style.outline if style else color),
+                       'LineStyle': int(number(dash_style, 0)), 'LocationCount': len(vertices)})
         if not _unfilled(fill):
-            record.update({'IsSolid': 'T', 'AreaColor': _color(fill)})
+            record.update({'IsSolid': 'T', 'AreaColor': fill_color(fill)})
         for i, (px, py) in enumerate(vertices, 1):
             # SchLib parameter vertices use the same 10-mil DXP units as
             # pin locations. Dividing raw coordinates by 1000 magnifies the
@@ -274,15 +289,15 @@ def _schlib_component(data, part, check_cancelled, *, merged=False, merge_pcb=Fa
                 # Empty EasyEDA pin font fields mean Verdana 7pt, as in its SVG.
                 record = common(2)
                 record.update({'Name': pin_name, 'Designator': pin_number, 'Electrical': electrical,
-                               'FormalType': 1, 'PinConglomerate': flags, 'Color': _color(line[1]),
+                               'FormalType': 1, 'PinConglomerate': flags, 'Color': color(line[1], 'pin'),
                                'Symbol_InnerEdge': 3 if groups[6][0] == '1' else 0,
                                'Symbol_OuterEdge': 1 if groups[5][0] == '1' else 0,
                                'PinName_PositionConglomerate': 16,
                                'Name_CustomFontID': font(label[6] or 'Verdana', label[7] or '7pt'),
-                               'Name_CustomColor': _color(label[8]),
+                               'Name_CustomColor': color(label[8], 'text'),
                                'PinDesignator_PositionConglomerate': 16,
                                'Designator_CustomFontID': font(designator[6] or 'Verdana', designator[7] or '7pt'),
-                               'Designator_CustomColor': _color(designator[8])})
+                               'Designator_CustomColor': color(designator[8], 'text')})
                 _coord_parameter(record, 'Location.X', bx)
                 _coord_parameter(record, 'Location.Y', by)
                 _coord_parameter(record, 'PinLength', length)
@@ -302,10 +317,10 @@ def _schlib_component(data, part, check_cancelled, *, merged=False, merge_pcb=Fa
                 if rounded:
                     _coord_parameter(record, 'CornerXRadius', rx)
                     _coord_parameter(record, 'CornerYRadius', ry)
-                record.update({'Color': _color(fields[7]), 'LineWidth': min(3, max(0, round(number(fields[8], 1)))),
+                record.update({'Color': color(fields[7]), 'LineWidth': line_width(fields[8]),
                                'LineStyle': int(number(fields[9], 0)), 'Transparent': 'T' if _unfilled(fields[10]) else 'F'})
                 if not _unfilled(fields[10]):
-                    record.update({'IsSolid': 'T', 'AreaColor': _color(fields[10])})
+                    record.update({'IsSolid': 'T', 'AreaColor': fill_color(fields[10])})
                 records.append(_parameters(record))
             elif kind in ('PL', 'PG'):
                 vertices = points(fields[1])
@@ -320,7 +335,7 @@ def _schlib_component(data, part, check_cancelled, *, merged=False, merge_pcb=Fa
                 if rotation % 90:
                     raise DownloadError('AD 符号文字暂不支持非直角旋转')
                 record.update({'Text': fields[12], 'FontID': font(fields[6], fields[7]),
-                               'Color': _color(fields[5]), 'Orientation': int(rotation / 90),
+                               'Color': color(fields[5], 'text'), 'Orientation': int(rotation / 90),
                                'Justification': {'start': 0, 'middle': 1, 'end': 2}.get(fields[10], 0)})
                 _coord_parameter(record, 'Location.X', x(fields[2]))
                 _coord_parameter(record, 'Location.Y', y(fields[3]))
@@ -333,9 +348,9 @@ def _schlib_component(data, part, check_cancelled, *, merged=False, merge_pcb=Fa
                 _coord_parameter(record, 'Location.Y', y(fields[2]))
                 _coord_parameter(record, 'Radius', fields[3])
                 _coord_parameter(record, 'SecondaryRadius', fields[3] if is_circle else fields[4])
-                record.update({'Color': _color(fields[color_index]), 'LineWidth': min(3, max(0, round(number(fields[color_index + 1], 1))))})
+                record.update({'Color': color(fields[color_index]), 'LineWidth': line_width(fields[color_index + 1])})
                 if not _unfilled(fields[color_index + 3]):
-                    record.update({'AreaColor': _color(fields[color_index + 3]), 'IsSolid': 'T'})
+                    record.update({'AreaColor': fill_color(fields[color_index + 3]), 'IsSolid': 'T'})
                 records.append(_parameters(record))
             elif kind in ('A', 'PT'):
                 paths = path_points(fields[1], check_cancelled=check_cancelled)
@@ -360,11 +375,15 @@ def _schlib_component(data, part, check_cancelled, *, merged=False, merge_pcb=Fa
     designator = common(34)
     designator.update({'OwnerPartId': -1, 'Name': 'Designator', 'Text': params.get('pre') or 'U?', 'FontID': 1,
                        'Location.X': 0, 'Location.Y': 0, 'IsHidden': 'T'})
+    if style:
+        designator.update(Color=_color(style.text), FontID=font())
     records.append(_parameters(designator))
     for key, value in parameters.items():
         record = common(41)
         record.update({'OwnerPartId': -1, 'Name': key, 'Text': value, 'FontID': 1,
                        'Location.X': 0, 'Location.Y': 0, 'IsHidden': 'T'})
+        if style:
+            record.update(Color=_color(style.text), FontID=font())
         records.append(_parameters(record))
     if data.get('packageDetail'):
         list_index = len(records)
@@ -716,9 +735,10 @@ def merged_name(name, part):
 
 class MergedLibrary:
     """Compile components into one native library. Caller serializes add/build."""
-    def __init__(self, format, *, merge_pcb=False):
+    def __init__(self, format, *, merge_pcb=False, symbol_style='jlc'):
         self.format = format
         self.merge_pcb = merge_pcb
+        self.symbol_style = symbol_style
         self.fonts = [('Times New Roman', 8)]
         self.entries = {}
         self.footprint_names = {}
@@ -728,7 +748,7 @@ class MergedLibrary:
     def add(self, data, part, check_cancelled):
         if self.format == 'SCHLIB':
             entry = _schlib_component(data, part, check_cancelled, merged=True,
-                                      merge_pcb=self.merge_pcb, fonts=self.fonts)
+                                      merge_pcb=self.merge_pcb, fonts=self.fonts, symbol_style=self.symbol_style)
         else:
             entry = _pcblib_component(data, part, check_cancelled, merged=True)
         check_cancelled()
@@ -789,9 +809,10 @@ class MergedLibrary:
         return compound_file(streams, check_cancelled)
 
 
-def export_linked_schlib(data, part, check_cancelled, *, footprint_name=None):
+def export_linked_schlib(data, part, check_cancelled, *, footprint_name=None, symbol_style='jlc'):
     """An individual symbol may still reference a merged footprint library."""
-    header, streams = _schlib_component(data, part, check_cancelled, merge_pcb=True, footprint_name=footprint_name)
+    header, streams = _schlib_component(data, part, check_cancelled, merge_pcb=True,
+                                       footprint_name=footprint_name, symbol_style=symbol_style)
     streams['FileHeader'] = _parameters(header)
     return compound_file(streams, check_cancelled)
 

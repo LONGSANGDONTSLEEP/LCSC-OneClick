@@ -19,6 +19,7 @@ from urllib.parse import urlsplit
 
 from errors import Cancelled, DownloadError
 from app_settings import proxy_for_url, proxy_mode
+from symbol_style import normalize_symbol_style
 from app_logging import (log_event, record_error, traced, log_context, submit_logged,
                          safe_part, network_target)
 from store_diagnostics import record_request_error
@@ -387,8 +388,10 @@ class Options:
     project_schlib_name: str = ''
     project_pcblib_name: str = ''
     individual_directory: str = ''
+    symbol_style: str = 'jlc'
 
     def __post_init__(self):
+        self.symbol_style = normalize_symbol_style(self.symbol_style)
         if self.append_mode:
             targets = self.existing_targets()
             if targets:
@@ -596,7 +599,7 @@ def download_part(part: str, options: Options, api: NetworkApi,
                     continue
                 if fmt == 'SCHLIB':
                     exporter = export_linked_schlib if options.merge_pcblib and 'PCBLIB' in options.formats else export_schlib
-                    payload = exporter(data, part, api.check_cancelled)
+                    payload = exporter(data, part, api.check_cancelled, symbol_style=options.symbol_style)
                 elif fmt == 'PCBLIB':
                     exporter = export_linked_pcblib if options.merge_pcblib else export_pcblib
                     payload = exporter(data, part, api.check_cancelled)
@@ -658,7 +661,8 @@ def download_batch(parts, options, cancelled=None, progress=None, on_result=None
               existing_formats=list(options.existing_targets()), project_selected=bool(options.project_path),
               import_project=options.imports_project(),
               individual_formats=[fmt for fmt in merged_paths if options.keeps_individual(fmt)])
-    libraries = {fmt: MergedLibrary(fmt, merge_pcb='PCBLIB' in merged_paths) for fmt in merged_paths}
+    libraries = {fmt: MergedLibrary(fmt, merge_pcb='PCBLIB' in merged_paths,
+                                   symbol_style=options.symbol_style) for fmt in merged_paths}
     merge_lock = threading.Lock()
     deferred_outputs = {} if 'PCBLIB' in merged_paths else None
     originals, target_errors = {}, {}
@@ -775,7 +779,8 @@ def download_batch(parts, options, cancelled=None, progress=None, on_result=None
                     raise Cancelled()
                 exporter = export_linked_schlib if fmt == 'SCHLIB' else export_linked_pcblib
                 payload = exporter(data, result.part, api.check_cancelled,
-                                   footprint_name=footprint_names.get(result.part))
+                                   footprint_name=footprint_names.get(result.part),
+                                   **({'symbol_style': options.symbol_style} if fmt == 'SCHLIB' else {}))
                 api.check_cancelled()
                 stage = 'write'
                 with log_context(part=safe_part(result.part), format=fmt):
