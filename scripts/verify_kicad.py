@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'app'))
 from easyeda_import import parse_component
 from eda_ir import Pad, Pin
-from kicad import build_library, FORMATS
+from kicad import build_library, FORMATS, pin_electrical_type
 
 
 def expected_bbox(pad):
@@ -112,12 +112,15 @@ def main():
             unit_number = int(unit[1].rsplit('_', 2)[1])
             for pin in children(unit, 'pin'):
                 source = source_pins[(unit_number, child(pin, 'number')[1])]
+                assert pin[1] == pin_electrical_type(source.electrical), (component.part, source.number, pin[1])
                 for label, globally_hidden, expected_visible in (
                         ('name', names_hidden, source.name_visible), ('number', numbers_hidden, source.number_visible)):
                     text = child(pin, label)
                     size = float(child(child(child(text, 'effects'), 'font'), 'size')[1])
                     assert (not globally_hidden and size > 0) == expected_visible, (component.part, source.number, label)
                 assert child(pin, 'name')[1] == source.name
+            for rectangle in children(unit, 'rectangle'):
+                assert child(child(rectangle, 'fill'), 'type')[1] == 'background'
         ref = properties['Footprint']
         assert ref.startswith('LCSC3D_Test:') and (out / 'LCSC3D_Test.pretty' / (ref.split(':', 1)[1] + '.kicad_mod')).is_file()
     assert actual_pin_counts == expected_pin_counts
@@ -131,7 +134,8 @@ def main():
         geometry = json.loads((out / 'geometry-native.json').read_text('utf-8'))
     report = dict(success=True, version=version, components=len(components), symbol_units=units,
                   footprints=len(manifest), pins=sum(actual_pin_counts.values()), native_geometry=geometry,
-                  pin_label_visibility_verified=True, no_user_profile=True)
+                  pin_label_visibility_verified=True, electrical_types_verified=True,
+                  rectangle_background_fill_verified=True, no_user_profile=True)
     (out / 'verification.json').write_text(json.dumps(report, ensure_ascii=False, indent=2), 'utf-8')
     print(json.dumps(report, ensure_ascii=False))
 

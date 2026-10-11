@@ -29,6 +29,9 @@ class SymbolStyle:
     rectangle_filled: bool = True
     rectangle_transparent: bool = True
     min_pin_length: int = 20  # User-selected minimum: 200 mil (10 mil per unit).
+    pin_number_text: str = ''
+    max_pin_text: int = 0
+    preserve_stroke_width: bool = False
 
     def fill(self, value):
         """Keep transparent shapes and solid polarity/arrow marks distinct."""
@@ -49,11 +52,17 @@ class SymbolStyle:
                     squareRectangles=self.square_rectangles,
                     rectangleLineWidth=self.rectangle_line_width,
                     rectangleFilled=self.rectangle_filled, rectangleTransparent=self.rectangle_transparent,
-                    minPinLength=self.min_pin_length)
+                    minPinLength=self.min_pin_length, pinNumberText=self.pin_number_text,
+                    maxPinText=self.max_pin_text, preserveStrokeWidth=self.preserve_stroke_width)
 
 
 AD_STYLE = SymbolStyle()
+KICAD_STYLE = SymbolStyle(outline='#840000', pin='#840000', text='#008484', area='#ffffc2',
+    font='sans-serif', rectangle_transparent=False, square_rectangles=False, min_pin_length=0,
+    pin_number_text='#840000', max_pin_text=5, preserve_stroke_width=True)
 
 
 def symbol_style(value):
+    if value == 'kicad':
+        return KICAD_STYLE
     return AD_STYLE if normalize_symbol_style(value) == 'ad' else None

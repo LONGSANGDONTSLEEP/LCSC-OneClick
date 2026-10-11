@@ -125,7 +125,8 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
         self.assertEqual(set(json.loads(settings_path.read_text(encoding='utf-8'))),
                          {'destination', 'step', 'obj', 'schlib', 'pcblib', 'store_proxy', 'update_proxy', 'log_level', 'language', 'theme_mode', 'accent_color', 'accent_text_color', 'font_family', 'font_size', 'auto_backup',
                           'merge_schlib', 'merge_pcblib', 'schlib_name', 'pcblib_name',
-                          'kicad_symbol', 'kicad_footprint', 'kicad_merge', 'kicad_library_name',
+                          'kicad_symbol', 'kicad_footprint', 'kicad_merge_symbols', 'kicad_merge_footprints',
+                          'export_target', 'kicad_electrical_policy', 'kicad_library_name',
                           'keep_schlib', 'keep_pcblib', 'schlib_target', 'pcblib_target', 'project_path',
                           'library_mode', 'symbol_style', 'keep_individual', 'individual_directory', 'project_model_directory',
                           'project_schlib_directory', 'project_pcblib_directory', 'project_schlib_name', 'project_pcblib_name'})
@@ -442,6 +443,39 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
             fills = self.evaluate(self.window.symbol_view,
                 "['unfilled','white','dark'].map(id=>getComputedStyle(document.getElementById(id)).fill)")
             self.assertEqual(fills, ['none', 'rgb(255, 255, 255)', 'rgb(136, 0, 0)'])
+
+    def test_kicad_target_locks_style_and_fills_bodies_without_affecting_ad_choice(self):
+        data = fixture('C20197')
+        data['result'][0]['svg'] = '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 140 100">
+          <rect id="canvas" width="140" height="100" fill="white" stroke="none"/>
+          <g c_para="name`probe`">
+            <rect id="body" x="20" y="10" rx="3" width="100" height="70" fill="none" stroke="red"/>
+            <g c_partid="part_pin"><path d="M 0 40 L 20 40" fill="none" stroke="red"/>
+              <text id="name" x="25" y="40" font-size="9">Input</text>
+              <text id="number" x="5" y="35" font-size="9">1</text>
+            </g></g></svg>'''
+        api = SimpleNamespace(get_svg_data_of_component=lambda part: data, check_cancelled=lambda: None)
+        self.window.show()
+        with patch('main.NetworkApi', return_value=api):
+            self.window.preview_mode_buttons['symbol'].click()
+            self.wait_for_library()
+            self.window.symbol_style_box.setCurrentIndex(1)
+            self.window.export_target_box.setCurrentIndex(self.window.export_target_box.findData('kicad'))
+            self.wait_for_library()
+            self.assertEqual(self.window.symbol_view.document.symbol_style, 'kicad')
+            self.assertFalse(self.window.symbol_style_row.isVisible())
+            self.assertTrue(self.window.kicad_style_hint.isVisible())
+            actual = self.evaluate(self.window.symbol_view,
+                "['body','name','number'].map(id=>{const s=getComputedStyle(document.getElementById(id));return [s.fill,s.fillOpacity,s.fontSize];})")
+            self.assertEqual(actual[0][:2], ['rgb(255, 255, 194)', '1'])
+            self.assertEqual(actual[1], ['rgb(0, 132, 132)', '1', '5px'])
+            self.assertEqual(actual[2], ['rgb(132, 0, 0)', '1', '5px'])
+            self.assertEqual(self.evaluate(self.window.symbol_view,
+                "getComputedStyle(document.getElementById('body')).rx"), '3px')
+            self.window.export_target_box.setCurrentIndex(self.window.export_target_box.findData('ad'))
+            self.wait_for_library()
+            self.assertEqual(self.window.symbol_view.document.symbol_style, 'ad')
+            self.assertTrue(self.window.symbol_style_row.isVisible())
 
     def test_ad_pin_extension_preserves_body_names_and_long_pins_in_all_directions(self):
         data = fixture('C20197')
@@ -866,7 +900,8 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
         self.assertEqual(set(json.loads(settings_path.read_text(encoding='utf-8'))),
                          {'destination', 'step', 'obj', 'schlib', 'pcblib', 'store_proxy', 'update_proxy', 'log_level', 'language', 'theme_mode', 'accent_color', 'accent_text_color', 'font_family', 'font_size', 'auto_backup',
                           'merge_schlib', 'merge_pcblib', 'schlib_name', 'pcblib_name',
-                          'kicad_symbol', 'kicad_footprint', 'kicad_merge', 'kicad_library_name',
+                          'kicad_symbol', 'kicad_footprint', 'kicad_merge_symbols', 'kicad_merge_footprints',
+                          'export_target', 'kicad_electrical_policy', 'kicad_library_name',
                           'keep_schlib', 'keep_pcblib', 'schlib_target', 'pcblib_target', 'project_path',
                           'library_mode', 'symbol_style', 'keep_individual', 'individual_directory', 'project_model_directory',
                           'project_schlib_directory', 'project_pcblib_directory', 'project_schlib_name', 'project_pcblib_name'})

@@ -36,7 +36,7 @@ def commit_library(root, artifacts, check_cancelled=lambda: None):
     paths = [(artifact, (root / artifact.path).resolve()) for artifact in artifacts]
     if len({str(path).casefold() for _, path in paths}) != len(paths):
         raise DownloadError('元件库输出路径冲突')
-    pretty_dirs = {path.parent for _, path in paths if path.parent != root}
+    pretty_dirs = {path.parent for artifact, path in paths if artifact.format == 'KICAD_FOOTPRINT'}
     for _, path in paths:
         if not path.is_relative_to(root) or path == root:
             raise DownloadError('元件库输出路径越界')
@@ -57,6 +57,18 @@ def commit_library(root, artifacts, check_cancelled=lambda: None):
                 os.fsync(stream.fileno())
             staged.append((artifact, source, target))
         try:
+            # Independent libraries can live in existing component directories
+            # (which may already contain this batch's STEP/OBJ/AD output).
+            containers = {path.parent for _, path in paths} | {p.parent for p in pretty_dirs}
+            containers -= pretty_dirs
+            for container in sorted(containers):
+                missing, current = [], container
+                while current != root and not current.exists():
+                    missing.append(current)
+                    current = current.parent
+                for directory in reversed(missing):
+                    directory.mkdir()
+                    made_dirs.append(directory)
             for directory in sorted(pretty_dirs):
                 directory.mkdir()  # exclusive reservation; no existing directory is reused
                 made_dirs.append(directory)

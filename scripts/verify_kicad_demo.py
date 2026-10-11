@@ -19,8 +19,9 @@ root = args.output.resolve()
 root.mkdir(parents=True, exist_ok=True)
 fixtures = root / 'fixtures'
 fixtures.mkdir(exist_ok=True)
-for part in ('C20197', 'C2765186', 'C23922', 'C8734'):
+for part in ('C20197', 'C2765186', 'C23922', 'C8734', 'C2040'):
     shutil.copyfile(ROOT / 'app/tests/fixtures' / (part + '.json'), fixtures / (part + '.json'))
+shutil.copyfile(ROOT / 'app/tests/fixtures/C2040_svgs.json', fixtures / 'C2040_svgs.json')
 env = os.environ.copy()
 env.update(LOCALAPPDATA=str(root / 'LocalAppData'), APPDATA=str(root / 'AppData'),
            TEMP=str(root / 'Temp'), TMP=str(root / 'Temp'), KICAD_CONFIG_HOME=str(root / 'kicad-config'), PYTHONUTF8='1')
@@ -33,17 +34,44 @@ assert process.returncode == 0, process.returncode
 report = json.loads((root / 'kicad-verification.json').read_text('utf-8'))
 version = re.search(r"VERSION = '([^']+)'", (ROOT / 'app/main.py').read_text('utf-8')).group(1)
 assert report['success'] and report['frozen'] and report['version'] == version, report
-assert [c['name'] for c in report['cases']] == ['individual', 'combined', 'mixed', 'collision']
+assert [c['name'] for c in report['cases']] == ['individual', 'combined', 'merge-symbols', 'merge-footprints', 'footprint-only', 'ad', 'collision', 'preview-sample']
+assert report['kicad_preview_verified']
+assert report['preview_painted_pixels_verified']
 sys.path[:0] = [str(ROOT / 'app'), str(ROOT / 'app/tests')]
 from altium_inspect import schematic, pcb
-mixed = next(c for c in report['cases'] if c['name'] == 'mixed')
-for name in mixed['files']:
+ad = next(c for c in report['cases'] if c['name'] == 'ad')
+for name in ad['files']:
     path = Path(name)
     pins = 8 if 'C20197' in str(path) else 14
     if path.suffix == '.SchLib':
         assert len(schematic(path.read_bytes())[2]) == pins
     if path.suffix == '.PcbLib':
         assert len(pcb(path.read_bytes())[1]) == (8 if pins == 8 else 18)
+from test_kicad import sexpr, children, child
+from easyeda_import import parse_component
+from eda_ir import Pin
+from kicad import pin_electrical_type
+for case in report['cases']:
+    for name in case['files']:
+        path = Path(name)
+        if path.suffix != '.kicad_sym':
+            continue
+        for symbol in children(sexpr(path.read_bytes()), 'symbol'):
+            props = {p[1]: p[2] for p in children(symbol, 'property')}
+            component = parse_component(json.loads((fixtures / (props['SupplierPart'] + '.json')).read_text('utf-8')), props['SupplierPart'])
+            source = {(u.number, p.number): p for u in component.symbol.units for p in u.items if isinstance(p, Pin)}
+            for unit in children(symbol, 'symbol'):
+                number = int(unit[1].rsplit('_', 2)[1])
+                for pin in children(unit, 'pin'):
+                    expected = pin_electrical_type(source[(number, child(pin, 'number')[1])].electrical,
+                        'input' if case['name'] == 'merge-symbols' else 'source')
+                    assert pin[1] == expected, (case['name'], pin, expected)
+            ref = props['Footprint']
+            library, footprint = ref.split(':')
+            assert len(list((root / case['name']).rglob(library + '.pretty/' + footprint + '.kicad_mod'))) == 1
+for name, symbols, footprints in (('combined', 1, 1), ('merge-symbols', 1, 2), ('merge-footprints', 2, 1), ('footprint-only', 0, 1)):
+    assert len(list((root / name).rglob('*.kicad_sym'))) == symbols
+    assert len(list((root / name).rglob('*.pretty'))) == footprints
 if args.cli:
     for kind, target in (('sym', root / 'combined/LCSC3D.kicad_sym'), ('fp', root / 'combined/LCSC3D.pretty')):
         (root / ('native-' + kind)).mkdir(exist_ok=True)
@@ -56,7 +84,8 @@ if args.cli:
     assert len(list((root / 'native-sym').glob('*.svg'))) == expected_units
     assert len(list((root / 'native-fp').glob('*.svg'))) == 1
     report['frozen_files_read_by_kicad'] = True
-report['ad_mixed_geometry_verified'] = True
+report['ad_geometry_verified'] = True
+report['electrical_types_and_references_verified'] = True
 report['exe_sha256'] = hashlib.sha256(executable.read_bytes()).hexdigest()
 (root / 'verification.json').write_text(json.dumps(report, ensure_ascii=False, indent=2), 'utf-8')
 print(json.dumps({k: v for k, v in report.items() if k != 'cases'}, ensure_ascii=False))

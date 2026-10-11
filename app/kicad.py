@@ -11,6 +11,7 @@ import hashlib
 import json
 import math
 import re
+from pathlib import PurePosixPath
 
 from eda_ir import (D, Point, Pin, Pad, Graphic, Component, Extension, decimal, xy, rotate,
                     require_domain, check_extensions, graphic_paths)
@@ -20,6 +21,19 @@ from eda_targets import KICAD
 
 FORMATS = ('KICAD_SYMBOL', 'KICAD_FOOTPRINT')
 FORMAT_LABELS = {'KICAD_SYMBOL': 'KiCad 符号库', 'KICAD_FOOTPRINT': 'KiCad 封装库'}
+ELECTRICAL_TYPES = (
+    ('未指定', 'unspecified'), ('输入', 'input'), ('输出', 'output'),
+    ('双向', 'bidirectional'), ('三态', 'tri_state'), ('无源', 'passive'),
+    ('自由', 'free'), ('电源输入', 'power_in'), ('电源输出', 'power_out'),
+    ('开集电极', 'open_collector'), ('开射极', 'open_emitter'), ('不连接', 'no_connect'))
+ELECTRICAL_POLICIES = frozenset({'source', *(value for _, value in ELECTRICAL_TYPES)})
+
+
+def pin_electrical_type(value, policy='source'):
+    """Apply target policy without changing IR; unsupported values are unspecified."""
+    selected = value if policy == 'source' else policy
+    return selected if selected in ELECTRICAL_POLICIES - {'source'} else 'unspecified'
+
 LAYERS = {'top_copper': 'F.Cu', 'bottom_copper': 'B.Cu', 'top_silk': 'F.SilkS',
           'bottom_silk': 'B.SilkS', 'top_mask': 'F.Mask', 'bottom_mask': 'B.Mask',
           'top_paste': 'F.Paste', 'bottom_paste': 'B.Paste', 'outline': 'Edge.Cuts',
@@ -131,7 +145,9 @@ def symbol_graphic(item, check):
         raise DownloadError('KiCad 符号线型或线宽不受支持')
     stroke = f'(stroke (width {n(item.stroke.width)}) (type {style}))'
     fill = 'none'
-    if item.fill != 'none':
+    if item.kind == 'rect':
+        fill = 'background'
+    elif item.fill != 'none':
         color = item.fill.lstrip('#')
         if len(color) == 3:
             color = ''.join(c * 2 for c in color)
@@ -156,10 +172,8 @@ def symbol_graphic(item, check):
     return result
 
 
-def symbol_definition(component, name, footprint='', check=lambda: None, *, electrical_policy='passive'):
+def symbol_definition(component, name, footprint='', check=lambda: None, *, electrical_policy='source'):
     symbol = KICAD.require(component, 'symbol')
-    if electrical_policy not in ('passive', 'source'):
-        raise DownloadError('KiCad 引脚电气策略不受支持')
     reference = symbol.reference.rstrip('?0123456789') or 'U'
     pins = [i for unit in symbol.units for i in unit.items if isinstance(i, Pin)]
     hide_names = all(not pin.name_visible for pin in pins)
@@ -199,10 +213,7 @@ def symbol_definition(component, name, footprint='', check=lambda: None, *, elec
             if dx and dy or not (dx or dy):
                 raise DownloadError('KiCad 引脚仅支持非零的水平或垂直线段')
             angle = (0 if dx > 0 else 180) if dx else (90 if dy > 0 else 270)
-            electrical = 'passive' if electrical_policy == 'passive' else item.electrical
-            if electrical not in {'unspecified', 'input', 'output', 'bidirectional', 'tri_state', 'passive',
-                                  'free', 'power_in', 'power_out', 'open_collector', 'open_emitter', 'no_connect'}:
-                raise DownloadError('KiCad 引脚电气类型不受支持：' + electrical)
+            electrical = pin_electrical_type(item.electrical, electrical_policy)
             graphic = 'inverted_clock' if item.inverted and item.clock else 'inverted' if item.inverted else 'clock' if item.clock else 'line'
             result.append(f'(pin {electrical} {graphic} (at {p(item.connection)} {angle}) (length {n(abs(dx) + abs(dy))}) '
                           f'{"hide" if not item.visible else ""} '
@@ -401,51 +412,58 @@ class Artifact:
     parts: tuple[str, ...]
 
 
-def build_library(components, requested, name, check=lambda: None):
+def build_library(components, requested, name, check=lambda: None, *, electrical_policy='source',
+                  symbol_libraries=None, footprint_libraries=None):
     """Plan names and links before producing any file; report errors per domain."""
     name = library_name(name)
     artifacts, errors, footprint_names, used_names, known = [], {}, {}, set(), {}
+    symbol_libraries = symbol_libraries or {c.part: name for c in components}
+    footprint_libraries = footprint_libraries or {c.part: name for c in components}
     for component in components:
         if 'KICAD_FOOTPRINT' not in requested[component.part]:
             continue
         try:
             footprint = require_domain(component, 'footprint')
-            signature = semantic_key(footprint)
+            library = footprint_libraries[component.part]
+            signature = (library.casefold(), semantic_key(footprint))
             target = known.get(signature)
             if target is None:
                 candidate = identifier(footprint.name, component.part + '_Footprint')
                 target, index = candidate, 2
-                while target.casefold() in used_names:
+                while (library.casefold(), target.casefold()) in used_names:
                     target, index = candidate + '_' + str(index), index + 1
                 payload = footprint_definition(component, target, check)
-                used_names.add(target.casefold())
+                used_names.add((library.casefold(), target.casefold()))
                 known[signature] = target
-                artifacts.append(Artifact(name + '.pretty/' + target + '.kicad_mod', payload, 'KICAD_FOOTPRINT', (component.part,)))
+                artifacts.append(Artifact(library + '.pretty/' + target + '.kicad_mod', payload, 'KICAD_FOOTPRINT', (component.part,)))
             else:
-                index = next(i for i, a in enumerate(artifacts) if a.path == name + '.pretty/' + target + '.kicad_mod')
+                index = next(i for i, a in enumerate(artifacts) if a.path == library + '.pretty/' + target + '.kicad_mod')
                 old = artifacts[index]
                 artifacts[index] = Artifact(old.path, old.payload, old.format, old.parts + (component.part,))
-            footprint_names[component.part] = name + ':' + target
+            footprint_names[component.part] = PurePosixPath(library).name + ':' + target
         except DownloadError as exc:
             errors[(component.part, 'KICAD_FOOTPRINT')] = str(exc)
-    definitions, members = [], []
+    definitions, members = {}, {}
     used_names = set()
     for component in components:
         if 'KICAD_SYMBOL' not in requested[component.part]:
             continue
         try:
             symbol = require_domain(component, 'symbol')
+            library = symbol_libraries[component.part]
             candidate = identifier(symbol.name, component.part)
             target = candidate
-            if target.casefold() in used_names:
+            if (library.casefold(), target.casefold()) in used_names:
                 target += '_' + component.part
-            if target.casefold() in used_names:
+            if (library.casefold(), target.casefold()) in used_names:
                 raise DownloadError('KiCad 符号名称冲突')
-            definitions.append(symbol_definition(component, target, footprint_names.get(component.part, ''), check))
-            used_names.add(target.casefold())
-            members.append(component.part)
+            definitions.setdefault(library, []).append(symbol_definition(component, target,
+                footprint_names.get(component.part, ''), check, electrical_policy=electrical_policy))
+            used_names.add((library.casefold(), target.casefold()))
+            members.setdefault(library, []).append(component.part)
         except DownloadError as exc:
             errors[(component.part, 'KICAD_SYMBOL')] = str(exc)
-    if definitions:
-        artifacts.append(Artifact(name + '.kicad_sym', symbol_library(definitions), 'KICAD_SYMBOL', tuple(members)))
+    for library, items in definitions.items():
+        if items:
+            artifacts.append(Artifact(library + '.kicad_sym', symbol_library(items), 'KICAD_SYMBOL', tuple(members[library])))
     return artifacts, errors

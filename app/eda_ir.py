@@ -19,6 +19,11 @@ from errors import DownloadError
 
 SCHEMA_VERSION = '1.0'
 CORE_FEATURES = frozenset({'local-mm-y-up', 'symbol-units', 'pad-copper-drill'})
+# Open vocabulary: readers preserve future/source-specific values verbatim.
+# `power` records an undirected source declaration; it is not `power_in`.
+PIN_ELECTRICAL_TYPES = frozenset({'unspecified', 'input', 'output', 'bidirectional',
+    'tri_state', 'passive', 'free', 'power', 'power_in', 'power_out',
+    'open_collector', 'open_emitter', 'no_connect'})
 D = Decimal
 ZERO = D(0)
 
@@ -97,7 +102,7 @@ class Pin(Record):
     name: str = ''
     connection: Point = field(default_factory=Point)
     body: Point = field(default_factory=Point)
-    electrical: str = 'unspecified'
+    electrical: str = 'unspecified'  # Source semantics, never an export override.
     visible: bool = True
     name_visible: bool = True
     number_visible: bool = True

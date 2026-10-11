@@ -9,17 +9,25 @@ from library_files import commit_library
 
 def export_batch(results, entries, options, check):
     members = [r for r in results if r.part in entries]
-    groups = [members] if options.kicad_merge else [[r] for r in members]
+    merged = options.kicad_merge_symbols or options.kicad_merge_footprints
+    groups = [members] if merged else [[r] for r in members]
     for rows in groups:
         if not rows:
             continue
         formats = {r.part: tuple(f for f in r.pending_formats if f in FORMATS) for r in rows}
-        root = options.output_root() if options.kicad_merge else entries[rows[0].part][1]
-        name = options.kicad_library_name if options.kicad_merge else options.kicad_library_name + '_' + rows[0].part
+        root = options.output_root() if merged else entries[rows[0].part][1]
+        name = options.kicad_library_name
+        def libraries(combine):
+            return {r.part: name if combine else
+                (Path(entries[r.part][1]).relative_to(root) / (name + '_' + r.part)).as_posix()
+                for r in rows}
         errors = {}
         try:
             check()
-            artifacts, errors = build_library([entries[r.part][0] for r in rows], formats, name, check)
+            artifacts, errors = build_library([entries[r.part][0] for r in rows], formats, name, check,
+                electrical_policy=options.kicad_electrical_policy,
+                symbol_libraries=libraries(options.kicad_merge_symbols),
+                footprint_libraries=libraries(options.kicad_merge_footprints))
             written = commit_library(root, artifacts, check)
             for artifact, path in written:
                 for row in rows:

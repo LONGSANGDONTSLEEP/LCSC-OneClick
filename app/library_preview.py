@@ -34,7 +34,7 @@ class VectorPreview:
 
 
 def styled_symbol(document: VectorPreview, style: str) -> VectorPreview:
-    style = normalize_symbol_style(style)
+    style = style if style == 'kicad' else normalize_symbol_style(style)
     return document if document.symbol_style == style else replace(document, symbol_style=style)
 
 

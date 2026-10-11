@@ -394,9 +394,17 @@ class Options:
     symbol_style: str = 'jlc'
     kicad_merge: bool = False
     kicad_library_name: str = 'LCSC3D'
+    kicad_merge_symbols: bool | None = None
+    kicad_merge_footprints: bool | None = None
+    kicad_electrical_policy: str = 'source'
 
     def __post_init__(self):
         self.symbol_style = normalize_symbol_style(self.symbol_style)
+        # The demo.1 combined switch remains a supported caller contract.
+        if self.kicad_merge_symbols is None:
+            self.kicad_merge_symbols = self.kicad_merge
+        if self.kicad_merge_footprints is None:
+            self.kicad_merge_footprints = self.kicad_merge
         if any(fmt in KICAD_FORMATS for fmt in self.formats):
             if self.append_mode:
                 raise DownloadError('KiCad 首版支持新建库，请关闭 AD 追加模式')

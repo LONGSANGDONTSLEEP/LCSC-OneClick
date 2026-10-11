@@ -135,7 +135,7 @@ def symbol_item(shape, c, check):
         return Pin(number=designator[4] if len(designator) > 4 else header[3], name=label[4],
                    connection=c.point(*external), body=c.point(*body),
                    electrical={'': 'unspecified', '0': 'unspecified', '1': 'input', '2': 'output',
-                               '3': 'bidirectional', '4': 'power_in'}.get(header[2], 'source_type_' + header[2]),
+                               '3': 'bidirectional', '4': 'power'}.get(header[2], 'source_type_' + header[2]),
                    visible=header[1] == 'show', name_visible=label[0] == '1', number_visible=designator[0] == '1',
                    inverted=groups[5][0] == '1', clock=groups[6][0] == '1', color=line[1],
                    name_style=text_style(label[6] or 'Verdana', label[7], label[8], '7'),

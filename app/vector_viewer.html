@@ -107,7 +107,7 @@ html, body { margin:0; width:100%; height:100%; overflow:hidden; }
     // official SVG's inline/inherited styles, CSS classes and hidden pins.
     const items = elements.map(node => {
       const style = getComputedStyle(node);
-      return {node, fill:style.fill, stroke:style.stroke};
+      return {node, fill:style.fill, stroke:style.stroke, fontSize:style.fontSize};
     });
     const bounds = svg.viewBox.baseVal;
     const rectangles = [];
@@ -116,7 +116,7 @@ html, body { margin:0; width:100%; height:100%; overflow:hidden; }
       const rgb = fill.match(/^rgba?\(\s*([\d.]+)[, ]+([\d.]+)[, ]+([\d.]+)/i);
       return rgb && rgb.slice(1, 4).map(Number).reduce((a, b) => a + b, 0) / 3 >= preset.lightFillThreshold;
     };
-    for (const {node, fill, stroke} of items) {
+    for (const {node, fill, stroke, fontSize} of items) {
       // Compare native SVG lengths to the native viewBox: both use the same
       // float precision. Number("26.3") differs from viewBox.baseVal.height.
       if (node.parentElement === svg && node.localName === 'rect' && stroke === 'none'
@@ -132,15 +132,19 @@ html, body { margin:0; width:100%; height:100%; overflow:hidden; }
         set('font-family', preset.font);
         // Keep each source size, including CSS inheritance and tspan sizes.
         set('font-weight', 'normal'); set('font-style', 'normal');
-        if (fill !== 'none') set('fill', preset.text);
-        if (stroke !== 'none') set('stroke', preset.text);
+        const pinGroup = node.closest('[c_partid="part_pin"]');
+        const number = pinGroup && node.closest('text') === pinGroup.querySelectorAll('text')[1];
+        const color = number && preset.pinNumberText ? preset.pinNumberText : preset.text;
+        if (pin && preset.maxPinText) set('font-size', Math.min(parseFloat(fontSize), preset.maxPinText) + 'px');
+        if (fill !== 'none') set('fill', color);
+        if (stroke !== 'none') set('stroke', color);
       } else {
-        if (node.localName === 'rect' && preset.squareRectangles) {
-          set('rx', '0'); set('ry', '0');
+        if (node.localName === 'rect' && (preset.squareRectangles || preset.rectangleFilled)) {
+          if (preset.squareRectangles) { set('rx', '0'); set('ry', '0'); }
           set('stroke', preset.outline);
-          set('stroke-width', preset.rectangleLineWidth || 1);
+          if (!preset.preserveStrokeWidth) set('stroke-width', preset.rectangleLineWidth || 1);
           if (preset.rectangleLineWidth === 0) set('vector-effect', 'non-scaling-stroke');
-          set('stroke-dasharray', 'none');
+          if (!preset.preserveStrokeWidth) set('stroke-dasharray', 'none');
           set('fill', preset.rectangleFilled ? preset.area : 'none');
           // Transparent is independent of Fill Color: keep a translucent fill
           // so underlying objects remain visible, rather than disabling fill.
@@ -150,7 +154,7 @@ html, body { margin:0; width:100%; height:100%; overflow:hidden; }
         }
         if (stroke !== 'none') {
           set('stroke', pin ? preset.pin : preset.outline);
-          set('stroke-width', preset.lineWidth);
+          if (!preset.preserveStrokeWidth) set('stroke-width', preset.lineWidth);
         }
         if (fill !== 'none') {
           // Pale backgrounds stay pale; filled arrows/polarity marks stay ink.

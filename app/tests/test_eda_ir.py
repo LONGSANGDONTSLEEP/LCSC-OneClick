@@ -57,6 +57,25 @@ class IRTests(unittest.TestCase):
         self.assertEqual(component.symbol.units[0].items[0].number, 'A1')
         self.assertEqual(loads(dumps(component)), component)
 
+    def test_pin_electrical_semantics_and_unknown_source_values_survive_roundtrip(self):
+        for source, expected in (('', 'unspecified'), ('0', 'unspecified'), ('1', 'input'),
+                ('2', 'output'), ('3', 'bidirectional'), ('4', 'power'), ('future', 'source_type_future')):
+            data = fixture('C20197')
+            shapes = data['dataStr']['shape']
+            index = next(i for i, shape in enumerate(shapes) if shape.startswith('P~'))
+            parts = shapes[index].split('~')
+            parts[2] = source
+            shapes[index] = '~'.join(parts)
+            value = loads(dumps(parse_component(data, 'C20197')))
+            pin = next(i for u in value.symbol.units for i in u.items if isinstance(i, Pin))
+            self.assertEqual(pin.electrical, expected)
+            self.assertTrue(any(json.loads(e.payload).get('electrical') == source for e in pin.extensions))
+        wire = json.loads(dumps(value))
+        item = next(i for i in wire['symbol']['units'][0]['items'] if i['@type'] == 'Pin')
+        item.pop('electrical')
+        legacy = loads(json.dumps(wire))
+        self.assertEqual(next(i for i in legacy.symbol.units[0].items if isinstance(i, Pin)).electrical, 'unspecified')
+
     def test_future_optional_fields_and_namespaced_extensions_are_retained(self):
         wire = json.loads(dumps(parse_component(fixture(), 'C2765186')))
         wire['schema_version'] = '1.7'

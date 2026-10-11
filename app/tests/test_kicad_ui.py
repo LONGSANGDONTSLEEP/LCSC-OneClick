@@ -1,5 +1,6 @@
 """User-facing format selection, settings migration and locked batch controls."""
 import os
+import json
 from pathlib import Path
 import sys
 import tempfile
@@ -57,33 +58,65 @@ class KiCadUiTests(unittest.TestCase):
 
     def test_kicad_only_selection_and_library_name_survive_restart(self):
         w = self.window
+        w.export_target_box.setCurrentIndex(w.export_target_box.findData('kicad'))
         w.step_box.setChecked(False)
         w.kicad_symbol_box.setChecked(True)
         w.kicad_footprint_box.setChecked(True)
-        w.kicad_merge_box.setChecked(True)
+        w.kicad_merge_symbol_box.setChecked(False)
+        w.kicad_merge_footprint_box.setChecked(True)
+        w.kicad_electrical_box.setCurrentIndex(w.kicad_electrical_box.findData('bidirectional'))
         w.kicad_name_input.setText('MyParts')
         self.assertTrue(w.save_settings())
         restored = self.create_window()
         options = restored.export_options()
         self.assertEqual(options.formats, ('KICAD_SYMBOL', 'KICAD_FOOTPRINT'))
         self.assertEqual(options.kicad_library_name, 'MyParts')
-        self.assertTrue(options.kicad_merge)
+        self.assertFalse(options.kicad_merge_symbols)
+        self.assertTrue(options.kicad_merge_footprints)
+        self.assertEqual(options.kicad_electrical_policy, 'bidirectional')
+        self.assertEqual(restored.export_target_box.currentData(), 'kicad')
 
-    def test_append_mode_temporarily_disables_kicad_without_losing_selection(self):
+    def test_target_switch_isolates_ad_append_and_retains_both_targets_settings(self):
         w = self.window
+        w.step_box.setChecked(False)
+        w.schlib_box.setChecked(True)
         w.kicad_symbol_box.setChecked(True)
         w.lib_append_box.setChecked(True)
         self.assertTrue(w.kicad_symbol_box.isChecked())
         self.assertFalse(w.kicad_symbol_box.isEnabled())
         self.assertNotIn('KICAD_SYMBOL', w.selected_formats())
-        w.lib_append_box.setChecked(False)
+        w.export_target_box.setCurrentIndex(w.export_target_box.findData('kicad'))
         self.assertTrue(w.kicad_symbol_box.isEnabled())
-        self.assertIn('KICAD_SYMBOL', w.selected_formats())
+        self.assertEqual(w.selected_formats(), ('KICAD_SYMBOL',))
+        self.assertFalse(w.export_options().append_mode)
+        self.assertTrue(w.ad_format_options.isHidden())
+        self.assertTrue(w.append_options.isHidden())
+        self.assertFalse(w.kicad_options.isHidden())
+        self.assertTrue(w.path_input.isEnabled())
+        w.export_target_box.setCurrentIndex(w.export_target_box.findData('ad'))
+        self.assertTrue(w.lib_append_box.isChecked())
+        self.assertEqual(w.selected_formats(), ('SCHLIB',))
+        self.assertTrue(w.kicad_options.isHidden())
+        self.assertFalse(w.append_options.isHidden())
+
+    def test_legacy_combined_switch_migrates_to_both_merge_options(self):
+        main.SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
+        main.SETTINGS_PATH.write_text(json.dumps({'step': False, 'kicad_symbol': True,
+            'kicad_footprint': True, 'kicad_merge': True}), 'utf-8')
+        self.window._restore_settings()
+        self.assertEqual(self.window.export_target_box.currentData(), 'kicad')
+        options = self.window.export_options()
+        self.assertTrue(options.kicad_merge_symbols)
+        self.assertTrue(options.kicad_merge_footprints)
+        self.assertEqual(options.kicad_electrical_policy, 'source')
 
     def test_batch_locks_all_kicad_controls(self):
         w = self.window
+        w.export_target_box.setCurrentIndex(w.export_target_box.findData('kicad'))
         w.kicad_symbol_box.setChecked(True)
-        controls = (w.kicad_symbol_box, w.kicad_footprint_box, w.kicad_merge_box, w.kicad_name_input)
+        w.kicad_footprint_box.setChecked(True)
+        controls = (w.export_target_box, w.kicad_symbol_box, w.kicad_footprint_box, w.kicad_merge_symbol_box,
+                    w.kicad_merge_footprint_box, w.kicad_electrical_box, w.kicad_name_input)
         w.set_running(True)
         self.assertTrue(all(not c.isEnabled() for c in controls))
         w.set_running(False)

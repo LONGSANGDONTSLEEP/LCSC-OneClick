@@ -15,10 +15,10 @@ import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from eda_ir import Pin, Pad, Point, Graphic, D
+from eda_ir import Pin, Pad, Point, Graphic, D, Component, Symbol, SymbolUnit, dumps
 from easyeda_import import parse_component
 from errors import DownloadError, Cancelled
-from kicad import FORMATS, build_library, symbol_definition, footprint_definition
+from kicad import FORMATS, ELECTRICAL_TYPES, build_library, symbol_definition, footprint_definition
 from library_files import commit_library
 import library_files
 import backend
@@ -160,6 +160,53 @@ class KiCadTests(unittest.TestCase):
                 self.assertEqual(len(list(root.rglob('*.kicad_sym'))), 1 if merge else 2)
                 self.assertEqual(len(list(root.rglob('*.kicad_mod'))), 1 if merge else 2)
 
+    def test_independent_symbol_and_footprint_merging_preserves_every_reference(self):
+        for symbols, footprints in ((False, False), (True, False), (False, True), (True, True)):
+            root = self.root / f'{symbols}-{footprints}'
+            options = backend.Options(root, FORMATS + ('STEP',), kicad_merge_symbols=symbols,
+                                      kicad_merge_footprints=footprints, kicad_electrical_policy='output')
+            rows = backend.download_batch(['C23922', 'C8734'], options, api=self.api)
+            self.assertTrue(all(r.status == '成功' for r in rows), [r.message for r in rows])
+            self.assertEqual(len(list(root.rglob('*.kicad_sym'))), 1 if symbols else 2)
+            self.assertEqual(len(list(root.rglob('*.pretty'))), 1 if footprints else 2)
+            for path in root.rglob('*.kicad_sym'):
+                for symbol in children(sexpr(path.read_bytes()), 'symbol'):
+                    props = {p[1]: p[2] for p in children(symbol, 'property')}
+                    library, name = props['Footprint'].split(':')
+                    self.assertEqual(len(list(root.rglob(library + '.pretty/' + name + '.kicad_mod'))), 1)
+                    self.assertTrue(all(p[1] == 'output' for u in children(symbol, 'symbol') for p in children(u, 'pin')))
+        root = self.root / 'footprint-only'
+        rows = backend.download_batch(['C23922', 'C8734'], backend.Options(root, ('KICAD_FOOTPRINT',),
+            kicad_merge_footprints=True), api=self.api)
+        self.assertTrue(all(r.status == '成功' for r in rows))
+        self.assertEqual(len(list(root.glob('*.pretty/*.kicad_mod'))), 1)
+        self.assertFalse(list(root.rglob('*.kicad_sym')))
+
+    def test_supported_electrical_types_overrides_and_unknown_fallback_leave_ir_intact(self):
+        values = [v for _, v in ELECTRICAL_TYPES] + ['', 'source_type_99', 'power', 'future-type']
+        pins = tuple(Pin(number=str(i), name=value, electrical=value,
+                         connection=Point(D(-2), D(i)), body=Point(D(0), D(i))) for i, value in enumerate(values))
+        component = Component(part='C1', symbol=Symbol(name='Electrical', units=(SymbolUnit(items=pins),)))
+        before = dumps(component)
+        for policy in ['source'] + [v for _, v in ELECTRICAL_TYPES] + ['bad-policy']:
+            artifacts, errors = build_library([component], {'C1': ('KICAD_SYMBOL',)}, 'Test', electrical_policy=policy)
+            self.assertFalse(errors)
+            actual = children(child(child(sexpr(artifacts[0].payload), 'symbol'), 'symbol'), 'pin')
+            expected = values[:len(ELECTRICAL_TYPES)] + ['unspecified'] * 4 if policy == 'source' else [
+                policy if policy in {v for _, v in ELECTRICAL_TYPES} else 'unspecified'] * len(pins)
+            self.assertEqual([p[1] for p in actual], expected)
+        self.assertEqual(dumps(component), before)
+
+    def test_all_rectangles_are_filled_with_native_body_background(self):
+        for fill in ('none', '#000000', '#ffffff'):
+            for radius in (D(0), D('0.5')):
+                rectangle = Graphic('rect', (Point(),), size=Point(D(4), D(2)), radius=Point(radius, radius), fill=fill)
+                component = Component(part='C1', symbol=Symbol(units=(SymbolUnit(items=(rectangle,
+                    Pin(number='1', connection=Point(D(-2), D(0)))),),)))
+                node = child(sexpr(symbol_definition(component, 'Test')), 'symbol')
+                shape = child(node, 'polyline' if radius else 'rectangle')
+                self.assertEqual(child(child(shape, 'fill'), 'type')[1], 'background')
+
     def test_existing_library_and_existing_directory_remain_untouched(self):
         root = self.root / 'outputs'
         options = backend.Options(root, FORMATS, kicad_merge=True)
@@ -197,6 +244,26 @@ class KiCadTests(unittest.TestCase):
                 commit_library(root, artifacts)
             self.assertEqual(list(root.iterdir()), [])
             self.assertFalse(list((self.root / 'profile/LCSC3D/temp').glob('library-*')))
+
+    def test_separate_symbols_shared_footprints_rollback_preserves_existing_component_files(self):
+        components = [parse_component(fixture(part), part) for part in ('C23922', 'C8734')]
+        artifacts, errors = build_library(components, {c.part: FORMATS for c in components}, 'Combined',
+            symbol_libraries={'C23922': 'existing/First', 'C8734': 'new/nested/Second'})
+        self.assertFalse(errors)
+        root = self.root / 'rollback'
+        existing = root / 'existing'
+        existing.mkdir(parents=True)
+        preserved = existing / 'original.step'
+        preserved.write_bytes(b'original model')
+        original = library_files._move_new
+        def fail_last(source, target):
+            if target.name == 'Second.kicad_sym':
+                raise OSError('simulated final-symbol failure')
+            original(source, target)
+        with patch('library_files._move_new', side_effect=fail_last), self.assertRaises(OSError):
+            commit_library(root, artifacts)
+        self.assertEqual(preserved.read_bytes(), b'original model')
+        self.assertEqual(set(root.rglob('*')), {existing, preserved})
 
     def test_ir_failure_and_export_cancellation_do_not_leave_library_files(self):
         def cancel():

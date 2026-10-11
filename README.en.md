@@ -19,7 +19,7 @@
 
 LCSC3D is a portable Windows tool for hardware development, PCB design and mechanical fit checks. It combines storefront search, mainland account favorites, model downloads, Altium Designer library export and four preview modes in one application. Download and run `LCSC3D.exe`; no Python installation is required. Exporting AD libraries does not require Altium Designer to be installed either.
 
-**Current development version: 2.3.0-demo.1 (local feature preview)** · **[Download the published Windows version](https://github.com/Travelerrrrrr/LCSC3D/releases/latest/download/LCSC3D.exe)** · [Full source package](https://github.com/Travelerrrrrr/LCSC3D/releases/latest/download/LCSC3D.zip) · [Release notes (Chinese)](docs/releases/v2.3.0-demo.1.md) · [Report an issue](https://github.com/Travelerrrrrr/LCSC3D/issues)
+**Current development version: 2.3.0-demo.2 (local feature preview)** · **[Download the published Windows version](https://github.com/Travelerrrrrr/LCSC3D/releases/latest/download/LCSC3D.exe)** · [Full source package](https://github.com/Travelerrrrrr/LCSC3D/releases/latest/download/LCSC3D.zip) · [Release notes (Chinese)](docs/releases/v2.3.0-demo.2.md) · [Report an issue](https://github.com/Travelerrrrrr/LCSC3D/issues)
 
 **Custom append destinations, library names and direct project import.** Version 2.2.2 supports separate 3D, SchLib and PcbLib folders for project exports, a separate part folder, and a direct library-import button in Append settings. The latest local build is `outputs/LCSC3D.exe`; download links still point to the published version.
 
@@ -29,11 +29,11 @@ Screenshots show the actual application, using 2.2.1 except for the updated Appe
 
 ## KiCad export preview
 
-Version 2.3.0-demo.1 adds native KiCad 8+ symbols and footprints, individual and combined libraries, shared-footprint reuse, and simultaneous AD export. A versioned EDA intermediate model preserves source geometry, optional extensions and explicit target capabilities for future adapters.
+Version 2.3.0-demo.2 adds native KiCad 8+ symbols and footprints, individual and combined libraries, shared-footprint reuse, independent symbol/footprint merge options and configurable pin electrical types. A versioned EDA intermediate model preserves source geometry, optional extensions and explicit target capabilities for future adapters.
 
-Select **KiCad → Symbols / Footprints**, optionally enable **Combine KiCad libraries**, and choose a library name. Add the exported `.kicad_sym` file and `.pretty` directory through KiCad's library managers. The footprint library nickname must match the exported name, such as `LCSC3D` or `LCSC3D_C20197`.
+Select **Export to → KiCad**, choose **Symbols / Footprints**, independently enable **Combine symbols / Combine footprints**, and choose a library name. Add the exported `.kicad_sym` file and `.pretty` directory through KiCad's library managers. The footprint library nickname must match the exported name, such as `LCSC3D` or `LCSC3D_C20197`.
 
-This first version creates new libraries and preserves existing same-name destinations. KiCad append, automatic project registration and 3D model placement are not yet supported. Pins default to Passive; native text and colors are used, with pin labels capped at 1.27 mm. Curves may be flattened at 0.00127 mm tolerance, and component-body projections use fabrication outlines, with conversion notices in results. App previews still show the official source resources. Verified with KiCad 8.0.9, 9.0.9, and 10.0.7. The local executable is `outputs/LCSC3D.exe`; online links still point to the published release.
+This first version creates new libraries and preserves existing same-name destinations. KiCad append, automatic project registration and 3D model placement are not yet supported. Pins use source electrical types by default; unsupported or undirected power types become Unspecified. The type selector can override all exported pins. Rectangles use solid body-background fill. Native text and colors are used, with pin labels capped at 1.27 mm. Curves may be flattened at 0.00127 mm tolerance, and component-body projections use fabrication outlines, with conversion notices in results. Selecting KiCad fixes symbol previews to KiCad style, applied to the official SVG. Returning to AD restores its previous style. Inactive target settings do not affect exports. Verified with KiCad 8.0.9, 9.0.9, and 10.0.7. The local executable is `outputs/LCSC3D.exe`; online links still point to the published release.
 
 ## What's new in 2.2.2
 
@@ -187,7 +187,7 @@ The same C456013 part is shown on the official storefront below. Symbol and foot
 
 ## Merge, append and PCB project integration
 
-The **Symbol** preview tab includes **Symbol style: JLC / AD**. Changing the style updates the preview and new SchLib exports. AD uses dark red outlines, black pins and dark blue Times New Roman text while retaining each original text size (SchLib font sizes retain the existing integer-point rounding). Native rectangles use a Small border with both Fill Color and Transparent enabled, regardless of the original fill. Pins shorter than 200 mil extend outward with their body ends fixed; longer pins stay unchanged. JLC retains the original appearance and pin lengths. Both styles export every pin as Passive. Canvas backgrounds remain white. The selection is saved, and existing library entries retain their content when appending.
+With Altium Designer selected, the **Symbol** preview tab includes **Symbol style: JLC / AD**. Changing the style updates the preview and new SchLib exports. AD uses dark red outlines, black pins and dark blue Times New Roman text while retaining each original text size (SchLib font sizes retain the existing integer-point rounding). Native rectangles use a Small border with both Fill Color and Transparent enabled, regardless of the original fill. Pins shorter than 200 mil extend outward with their body ends fixed; longer pins stay unchanged. JLC retains the original appearance and pin lengths. Both styles export every pin as Passive. Canvas backgrounds remain white. The selection is saved, and existing library entries retain their content when appending.
 
 The compact input area and table header leave more room for the download list, with a wider scrollbar and pixel scrolling. Batch progress and status appear inside the export control panel below. Text on selected rows follows the configured button text color with or without keyboard focus.
 
