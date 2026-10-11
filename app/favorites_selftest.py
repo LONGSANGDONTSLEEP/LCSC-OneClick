@@ -16,7 +16,7 @@ from urllib.parse import parse_qs, urlsplit
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import QApplication
 
-from favorites import FavoritesDialog
+from favorites import FavoritesDialog, THUMBNAIL_COLUMN
 from store import MemorySession, StoreClient, FAVORITES_URL
 from store_session import SessionVault
 
@@ -511,12 +511,14 @@ def start(window, destination):
                 dialog.start_search()
                 state['phase'] = 'search-first'
             elif state['phase'] == 'search-first' and not dialog.searching and not dialog.has_jobs():
-                assert len(dialog.search_items) == 50 and dialog.search_table.rowCount() == 50
-                assert dialog.search_total == 75 and dialog.search_pages == 2
+                assert len(dialog.search_items) == 20 and dialog.search_table.rowCount() == 20
+                assert dialog.search_total == 75 and dialog.search_pages == 4
                 assert not dialog.selected_items()
-                report['first_search_page'] = 50
+                report['first_search_page'] = 20
+                assert all(not dialog.search_table.item(row, THUMBNAIL_COLUMN).icon().isNull() for row in range(20))
+                report['row_thumbnails'] = 20
                 report['search_total'] = 75
-                report['search_pages'] = 2
+                report['search_pages'] = 4
                 first, second = dialog.search_table.cellWidget(0, 5), dialog.search_table.cellWidget(1, 5)
                 assert first.currentData() == 1 and second.currentData() == 5
                 assert '0.012345' in first.currentText()
@@ -534,11 +536,11 @@ def start(window, destination):
                 dialog.next_page_button.click()
                 state['phase'] = 'search-second'
             elif state['phase'] == 'search-second' and not dialog.searching and not dialog.has_jobs():
-                assert dialog.search_page == 2 and dialog.search_table.rowCount() == 25
+                assert dialog.search_page == 2 and dialog.search_table.rowCount() == 20
                 assert len(dialog.search_selected) == 1
                 assert dialog.search_table.item(0, 0).checkState() == Qt.Unchecked
                 dialog.search_table.item(0, 0).setCheckState(Qt.Checked)
-                report['second_search_page'] = 25
+                report['second_search_page'] = 20
                 dialog.previous_page_button.click()
                 state['phase'] = 'search-return'
             elif state['phase'] == 'search-return' and not dialog.searching and not dialog.has_jobs():
@@ -745,22 +747,24 @@ def start_live(window, destination):
                 dialog.start_search()
                 state['phase'] = 'page-first'
             elif state['phase'] == 'page-first' and not dialog.searching and not dialog.has_jobs():
-                assert len(dialog.search_items) == 50 and dialog.search_table.rowCount() == 50
-                assert dialog.search_total > 50 and not dialog.selected_items()
+                assert len(dialog.search_items) == 20 and dialog.search_table.rowCount() == 20
+                assert dialog.search_total > 20 and not dialog.selected_items()
                 report['mcu_total'] = dialog.search_total
                 report['mcu_pages'] = dialog.search_pages
-                report['first_mcu_page_count'] = 50
+                report['first_mcu_page_count'] = 20
+                report['row_thumbnails'] = sum(not dialog.search_table.item(row, THUMBNAIL_COLUMN).icon().isNull() for row in range(20))
+                assert report['row_thumbnails'] > 0
                 state['first_part'] = dialog.search_items[0]['part']
                 dialog.search_table.item(0, 0).setCheckState(Qt.Checked)
                 dialog.next_page_button.click()
                 state['phase'] = 'page-second'
             elif state['phase'] == 'page-second' and not dialog.searching and not dialog.has_jobs():
-                assert dialog.search_page == 2 and dialog.search_table.rowCount() == 50
+                assert dialog.search_page == 2 and dialog.search_table.rowCount() == 20
                 assert len(dialog.search_selected) == 1
                 state['second_part'] = dialog.search_items[0]['part']
                 assert state['second_part'] != state['first_part']
                 dialog.search_table.item(0, 0).setCheckState(Qt.Checked)
-                report['second_mcu_page_count'] = 50
+                report['second_mcu_page_count'] = 20
                 dialog.previous_page_button.click()
                 state['phase'] = 'page-return'
             elif state['phase'] == 'page-return' and not dialog.searching and not dialog.has_jobs():

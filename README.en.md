@@ -52,7 +52,7 @@ Library merging, appending, PCB project integration, reuse of identical footprin
 
 | Feature | Capabilities |
 | --- | --- |
-| Store search | Search by C-number, MPN or keyword, with up to 50 results per page and selections retained across pages. International keyword searches also provide a category selector when applicable. |
+| Store search | Search by C-number, MPN or keyword, with up to 20 results per page and selections retained across pages. International keyword searches also provide a category selector when applicable. |
 | Prices and stock | View available stock and independently select each product's quantity-price tier. Mainland prices use CNY; international prices use USD. |
 | Mainland account favorites | Sign in, retrieve account favorites, save a product as a favorite or remove it, and import checked favorites into the download list. |
 | Product information and images | Read full descriptions and parameters, open datasheets, and view original product images with zoom and pan. |
@@ -89,7 +89,9 @@ For white text on teal buttons, choose a teal accent and set **Button text color
 
 Open the store and enter a C-number, MPN or keyword. Search does not require sign-in. Click a row to read product details, or **Preview selected** to return to the workspace and preview that part. Returning to the store retains the current page and selections.
 
-Each page contains up to **50 parts**. Previous/next page controls fetch only the requested page. Checkboxes select parts to import, while the highlighted row controls the detail view and preview. New search results and mainland favorites start unchecked. **Add to download list** imports checked parts across the pages of the current search; select-all and invert operate on the current page. A new search clears the previous search's selections and price-tier choices.
+Each page contains up to **20 parts**. Every row includes a photo thumbnail between its checkbox and C-number; double-click the photo to open the original gallery. Photos keep their proportions, load asynchronously and are cached for page navigation. Missing or failed photos use a placeholder. Narrow tables scroll horizontally while keeping model names readable.
+
+Previous/next page controls fetch only the requested page. Checkboxes select parts to import, while the highlighted row controls the detail view and preview. New search results and mainland favorites start unchecked. **Add to download list** imports checked parts across the pages of the current search; select-all and invert operate on the current page. A new search clears the previous search's selections and price-tier choices.
 
 Price tiers are independent for each product. The mainland storefront defaults to **1+**, or the lowest available minimum-order tier when 1+ is unavailable, retaining the original price precision. Returning to a page restores its manually selected tiers. Stock shows available quantity, `0` means no stock, and `—` indicates missing price or stock information. English mode displays the international storefront's USD prices and stock.
 

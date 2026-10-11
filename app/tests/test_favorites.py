@@ -16,9 +16,9 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import main
 from errors import Cancelled
-from favorites import FavoritesDialog
+from favorites import FavoritesDialog, THUMBNAIL_COLUMN
 from favorites_selftest import (OfflineStore, fixture_favorites, fixture_product, fixture_search,
-                                fixture_store_record, fixture_detail, native_click)
+                                fixture_store_record, fixture_detail, fixture_png, native_click)
 from store import (MemorySession, StoreClient, StoreError, SessionExpired, catalog_products,
                    favorite_products, normalize_items, public_url, product_page, search_page_products, CaptchaRequired,
                    storefront_product)
@@ -404,17 +404,21 @@ class StoreProtocolTests(unittest.TestCase):
             self.service.search_pages[('单片机', page)] = fixture_search(rows[(page-1)*30:page*30], page, len(rows))
         return rows
 
-    def test_search_loads_one_fifty_result_page_and_requests_next_page_explicitly(self):
+    def test_twenty_result_pages_cover_native_page_boundaries_without_gaps(self):
         rows = self.multi_page_search()
         first = self.client.search_results_page('单片机')
-        self.assertEqual([p['part'] for p in first['items']], [part for part, _ in rows[:50]])
-        self.assertEqual((first['total'], first['pages'], first['size']), (75, 2, 50))
+        self.assertEqual([p['part'] for p in first['items']], [part for part, _ in rows[:20]])
+        self.assertEqual((first['total'], first['pages'], first['size']), (75, 4, 20))
         requests = [r for r in self.service.requests if r[1] == '/query/product']
-        self.assertEqual([json.loads(r[3])['currentPage'] for r in requests], [1, 2])
+        self.assertEqual([json.loads(r[3])['currentPage'] for r in requests], [1])
         self.assertTrue(all(r[0] == 'POST' and json.loads(r[3])['pageSize'] == 30 for r in requests))
         second = self.client.search_results_page('单片机', 2)
-        self.assertEqual([p['part'] for p in second['items']], [part for part, _ in rows[50:]])
-        self.assertEqual(len(first['items']) + len(second['items']), 75)
+        self.assertEqual([p['part'] for p in second['items']], [part for part, _ in rows[20:40]])
+        third = self.client.search_results_page('单片机', 3)
+        last = self.client.search_results_page('单片机', 4)
+        combined = first['items'] + second['items'] + third['items'] + last['items']
+        self.assertEqual([p['part'] for p in combined], [part for part, _ in rows])
+        self.assertEqual([len(p['items']) for p in (first, second, third, last)], [20, 20, 20, 15])
 
     def test_cancelled_search_stops_before_requesting_followup_pages(self):
         self.multi_page_search()
@@ -435,7 +439,7 @@ class StoreProtocolTests(unittest.TestCase):
         repeated['result']['searchResult']['currePage'] = 2
         self.service.search_pages[('单片机', 2)] = repeated
         with self.assertRaises(StoreError):
-            self.client.search_results_page('单片机')
+            self.client.search_results_page('单片机', 2)
 
     def test_storefront_detail_is_available_when_eda_has_no_component(self):
         self.service.catalog_missing.add('C2')
@@ -611,6 +615,72 @@ class SessionVaultTests(unittest.TestCase):
 
 @unittest.skipUnless(sys.platform == 'win32', 'Native Qt window regression')
 class NativeStoreWindowTests(unittest.TestCase):
+    def test_search_photos_fit_rows_reuse_cache_and_open_original_gallery(self):
+        self.service.search_pages[('图片', 1)] = fixture_search([('C2040', 'RP2040'), ('C2', 'Other')])
+        self.search_ready('图片')
+        table = self.dialog.search_table
+        for row in range(2):
+            cell = table.item(row, THUMBNAIL_COLUMN)
+            self.assertFalse(cell.icon().isNull())
+            self.assertLess(table.visualItemRect(cell).right(), table.visualItemRect(table.item(row, 1)).left())
+            self.assertGreaterEqual(table.rowHeight(row), table.iconSize().height() + 12)
+        self.assertGreaterEqual(table.columnWidth(2), 150)
+        urls = [table.item(row, THUMBNAIL_COLUMN).data(Qt.UserRole) for row in range(2)]
+        self.assertTrue(all('/breviary/' in url for url in urls))
+        requests = len(self.service.requests)
+        self.dialog.start_thumbnails()
+        QTest.qWait(30)
+        self.assertEqual(len(self.service.requests), requests)
+        table.item(1, 0).setCheckState(Qt.Checked)
+        point = table.visualItemRect(table.item(0, THUMBNAIL_COLUMN)).center()
+        QTest.mouseClick(table.viewport(), Qt.LeftButton, pos=point)
+        QTest.mouseDClick(table.viewport(), Qt.LeftButton, pos=point)
+        self.wait_until(lambda: self.dialog.galleries and self.dialog.galleries[0].view.photo)
+        self.assertEqual([item['part'] for item in self.dialog.selected_items()], ['C2'])
+        self.assertEqual(self.dialog.galleries[0].part, 'C2040')
+
+    def test_unavailable_row_photos_do_not_block_other_products_or_prices(self):
+        items = [dict(part='C1', title='Wide', thumbnails=['wide'], stock=10),
+                 dict(part='C2', title='Missing'), dict(part='C3', title='Bad', thumbnails=['bad'])]
+        client = SimpleNamespace(image=lambda url, stop: fixture_png(128, 32) if url == 'wide' else b'bad image')
+        with patch.object(self.dialog, 'factory', return_value=client), \
+             patch.object(self.dialog, 'show_detail'), patch.object(self.dialog, 'request_detail'):
+            self.dialog.search_loaded(dict(page=1, total=3, pages=1, items=items))
+            self.wait_until(lambda: not self.dialog.has_jobs())
+        table = self.dialog.search_table
+        self.assertFalse(table.item(0, THUMBNAIL_COLUMN).icon().isNull())
+        self.assertEqual(table.item(0, 6).text(), '10')
+        self.assertEqual(table.item(1, THUMBNAIL_COLUMN).text(), '—')
+        self.assertEqual(table.item(2, THUMBNAIL_COLUMN).text(), '—')
+        image = self.dialog.thumbnail_cache['wide']
+        self.assertEqual(image.size().toTuple(), (128, 128))
+        self.assertEqual(image.pixelColor(32, 20).name(), '#ffffff')
+        self.assertEqual(image.pixelColor(0, 63).name(), '#000000')  # Image centered without stretching.
+        self.assertEqual(table.rowCount(), 3)
+
+    def test_late_thumbnail_from_previous_page_never_replaces_new_row(self):
+        started, release = threading.Event(), threading.Event()
+        def read(url, stop):
+            if url == 'old':
+                started.set()
+                release.wait(5)
+            return fixture_png()
+        client = SimpleNamespace(image=read)
+        with patch.object(self.dialog, 'factory', return_value=client), \
+             patch.object(self.dialog, 'show_detail'), patch.object(self.dialog, 'request_detail'):
+            try:
+                self.dialog.search_loaded(dict(page=1, pages=2, total=2, items=[dict(part='C1', thumbnails=['old'])]))
+                self.wait_until(started.is_set)
+                self.dialog.search_loaded(dict(page=2, pages=2, total=2, items=[dict(part='C2', thumbnails=['new'])]))
+                self.wait_until(lambda: not self.dialog.search_table.item(0, THUMBNAIL_COLUMN).icon().isNull())
+            finally:
+                release.set()
+            self.wait_until(lambda: not self.dialog.has_jobs())
+        cell = self.dialog.search_table.item(0, THUMBNAIL_COLUMN)
+        self.assertEqual(cell.data(Qt.UserRole), 'new')
+        self.assertEqual(self.dialog.search_table.item(0, 1).text(), 'C2')
+        self.assertNotIn('old', self.dialog.thumbnail_cache)
+
     def test_each_search_product_has_independent_precise_price_tiers_and_stock(self):
         payload = fixture_search([('C2040', 'RP2040'), ('C2', 'Other')])
         payload['result']['searchResult']['productRecordList'][1]['productVO']['minBuyNumber'] = 5
@@ -902,23 +972,23 @@ class NativeStoreWindowTests(unittest.TestCase):
         for page in range(1, 4):
             self.service.search_pages[('单片机', page)] = fixture_search(rows[(page-1)*30:page*30], page, 75)
         self.search_ready('单片机')
-        self.assertEqual(self.dialog.search_table.rowCount(), 50)
+        self.assertEqual(self.dialog.search_table.rowCount(), 20)
         self.assertFalse(self.dialog.selected_items())
         self.assertFalse(self.dialog.previous_page_button.isEnabled())
         self.dialog.search_table.item(0, 0).setCheckState(Qt.Checked)
         self.dialog.next_page_button.click()
         self.wait_until(lambda: not self.dialog.searching and self.dialog.search_page == 2)
-        self.assertEqual(self.dialog.search_table.rowCount(), 25)
-        self.assertFalse(self.dialog.next_page_button.isEnabled())
-        self.assertTrue(all(self.dialog.search_table.item(r, 0).checkState() == Qt.Unchecked for r in range(25)))
+        self.assertEqual(self.dialog.search_table.rowCount(), 20)
+        self.assertTrue(self.dialog.next_page_button.isEnabled())
+        self.assertTrue(all(self.dialog.search_table.item(r, 0).checkState() == Qt.Unchecked for r in range(20)))
         self.dialog.search_table.item(0, 0).setCheckState(Qt.Checked)
         self.assertIn('75', self.dialog.search_hint.text())
-        self.assertEqual([p['part'] for p in self.dialog.selected_items()], ['C1000', 'C1050'])
+        self.assertEqual([p['part'] for p in self.dialog.selected_items()], ['C1000', 'C1020'])
         self.dialog.previous_page_button.click()
         self.wait_until(lambda: not self.dialog.searching and self.dialog.search_page == 1)
         self.assertEqual(self.dialog.search_table.item(0, 0).checkState(), Qt.Checked)
         self.dialog.import_selected()
-        self.assertEqual(self.window.ids, ['C1000', 'C1050'])
+        self.assertEqual(self.window.ids, ['C1000', 'C1020'])
         self.search_ready('C2040')
         self.assertFalse(self.dialog.search_selected)
         self.assertFalse(self.dialog.selected_items())

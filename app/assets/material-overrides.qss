@@ -58,7 +58,8 @@ QTableView::item:selected:focus, QTreeView::item:selected:focus, QListView::item
 }
 QHeaderView { background:%(field)s; border:0; }
 QHeaderView::section { background:%(field)s; color:%(muted)s; border:0; border-bottom:1px solid %(border)s; padding:10px 6px; font-weight:600; }
-QTableWidget#downloadTable QHeaderView::section { height:%(control_height)spx; padding:6px; }
+QTableWidget#downloadTable QHeaderView::section, QTableWidget#searchProducts QHeaderView::section { height:%(control_height)spx; padding:6px; }
+QTableWidget#searchProducts QHeaderView::section { text-transform:none; }
 QTableCornerButton::section { background:%(field)s; border:0; }
 QProgressBar { color:%(text)s; border:0; background:%(hover)s; border-radius:3px; height:6px; text-align:center; }
 QProgressBar::chunk { background:%(accent)s; border-radius:3px; }
@@ -69,9 +70,9 @@ QScrollBar:horizontal { background:transparent; height:10px; margin:0; }
 QScrollBar::handle:horizontal { background:%(border)s; border-radius:5px; min-width:26px; }
 QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width:0; }
 QScrollBar::add-page, QScrollBar::sub-page { background:transparent; }
-QTableWidget#downloadTable QScrollBar:vertical { width:14px; }
-QTableWidget#downloadTable QScrollBar::handle:vertical { background:%(control_border)s; border-radius:6px; min-height:36px; }
-QTableWidget#downloadTable QScrollBar::handle:vertical:hover { background:%(accent_ink)s; }
+QTableWidget#downloadTable QScrollBar:vertical, QTableWidget#searchProducts QScrollBar:vertical { width:14px; }
+QTableWidget#downloadTable QScrollBar::handle:vertical, QTableWidget#searchProducts QScrollBar::handle:vertical { background:%(control_border)s; border-radius:6px; min-height:36px; }
+QTableWidget#downloadTable QScrollBar::handle:vertical:hover, QTableWidget#searchProducts QScrollBar::handle:vertical:hover { background:%(accent_ink)s; }
 QSplitter::handle { background:transparent; }
 QToolTip { background:%(surface)s; color:%(text)s; border:1px solid %(border)s; padding:6px; }
 QFrame#previewEmpty, QGraphicsView#photoCanvas { background:%(field)s; border:1px solid %(border)s; border-radius:8px; }

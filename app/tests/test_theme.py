@@ -339,7 +339,7 @@ class InternationalCatalogTests(unittest.TestCase):
         return InternationalStoreClient(session), session
 
     def page(self, rows, page=1, total=52):
-        return {'code': 200, 'result': {'currPage': page, 'pageRow': 50, 'actualTotalRow': total, 'dataList': rows}}
+        return {'code': 200, 'result': {'currPage': page, 'pageRow': 20, 'actualTotalRow': total, 'dataList': rows}}
 
     def discovery(self):
         return {'code': 200, 'result': {'scene': 'FULL_MATCH', 'catalogVOS': [
@@ -370,11 +370,13 @@ class InternationalCatalogTests(unittest.TestCase):
         second = client.search_results_page('STM32', page=2, catalog_id=941)
         switched = client.search_results_page('STM32', catalog_id=559)
         self.assertEqual((first['catalog_id'], second['page'], switched['catalog_id']), (941, 2, 559))
+        self.assertEqual((first['size'], first['pages']), (20, 3))
         self.assertEqual(len(first['categories']), 2)
         calls = session.request.call_args_list
         self.assertEqual(len(calls), 4)  # Discovery is reused across pages/categories.
         self.assertEqual(json.loads(calls[-1].kwargs['data'])['catalogIdList'], [559])
         self.assertTrue(all(c.args[0].startswith(API + '/') for c in calls))
+        self.assertTrue(all(json.loads(c.kwargs['data'])['pageSize'] == 20 for c in calls[1:]))
         self.assertTrue(all(c.kwargs['headers']['Referer'] == HOME + '/' for c in calls))
 
     def test_bad_pagination_is_reported_instead_of_showing_a_wrong_page(self):

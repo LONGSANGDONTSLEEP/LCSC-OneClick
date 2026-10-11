@@ -27,6 +27,7 @@ def international_product(raw):
     part = raw['productCode']
     images = raw.get('productImages') or [raw.get('productImageUrlBig') or raw.get('productImageUrl')]
     images = list(dict.fromkeys(public_url(value) for value in images if isinstance(value, str) and public_url(value)))
+    thumbnail = public_url(raw.get('productImageUrl')) or (images[0] if images else '')
     params = [(text(p.get('paramNameEn'), 160), text(p.get('paramValueEn'), 16384))
               for p in (raw.get('paramVOList') or []) if isinstance(p, dict) and p.get('paramNameEn')]
     tiers = []
@@ -42,6 +43,7 @@ def international_product(raw):
             'package': text(raw.get('encapStandard')), 'category': text(raw.get('wmCatalogNameEn') or raw.get('catalogName')),
             'description': text(raw.get('productIntroEn') or raw.get('productNameEn'), 16384),
             'parameters': params, 'images': images, 'image': images[0] if images else '',
+            'thumbnails': [thumbnail] if thumbnail else [],
             'datasheet': public_url(raw.get('pdfUrl')), 'store_url': HOME + '/product-detail/' + part + '.html',
             'stock': quantity(raw.get('stockNumber')), 'min_quantity': quantity(raw.get('minBuyNumber')) or 1,
             'unit': text(raw.get('productUnit')) or 'Piece', 'price_tiers': sorted(tiers, key=lambda p: p['quantity']),

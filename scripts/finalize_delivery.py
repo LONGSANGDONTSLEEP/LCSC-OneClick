@@ -60,7 +60,7 @@ if args.store_dir:
  assert all(r['success'] and r['frozen'] and r['version']==version for r in (offline,live))
  for key in ('independent_price_tiers','price_precision','stock_column','price_tier_survives_paging','full_description','wrapped_parameter_values','queue_delete_checked','queue_delete_preserves_files','native_password_login','native_sms_login','native_image_captcha'):assert offline[key]
  assert live['restored_without_qr'] and live['real_price_tier_switch']
- store_text=('- 原生商城离线与实网 EXE 验证通过：50 条分页、跨页选择、价格梯度、最低起订量、库存、完整文字、商品原图、账号收藏、三种登录与保存会话恢复，以及删除勾选器件后保留文件。\n'
+ store_text=(f"- 原生商城离线与实网 EXE 验证通过：{offline['first_search_page']} 条分页、跨页选择、价格梯度、最低起订量、库存、完整文字、商品原图、账号收藏、三种登录与保存会话恢复，以及删除勾选器件后保留文件。\n"
              '- 登录写入及图片验证使用本地模拟服务回归；短信和图片验证码在开发阶段由用户完成真实验证。本次真实账号验证仅恢复已保存会话并读取收藏，公开截图使用未登录的公开商品资料。\n')
 if args.store_offline_dir:
  offline=json.loads((args.store_offline_dir/'favorites-verification.json').read_text(encoding='utf-8'))

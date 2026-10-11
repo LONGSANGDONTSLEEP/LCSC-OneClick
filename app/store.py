@@ -36,7 +36,7 @@ STORE_SEARCH_URL = 'https://so.szlcsc.com/query/product'
 FAVORITE_STATE_URL = 'https://member.szlcsc.com/select/product/favorite/v2'
 FAVORITE_TOGGLE_URL = 'https://member.szlcsc.com/async/favorite/add/dynamic'
 FAVORITE_CANCEL_URL = 'https://member.szlcsc.com/async/favorite/cancel'
-SEARCH_PAGE_SIZE = 50
+SEARCH_PAGE_SIZE = 20
 USER_AGENT = ('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
               '(KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36')
 MAX_PARTS, MAX_PAGES = 10000, 200
@@ -776,7 +776,7 @@ class StoreClient:
 
     @traced('catalog.search_page', lambda self, keyword, page=1, **kw: {'page': page, 'query_length': len(keyword)}, level='INFO')
     def search_results_page(self, keyword, page=1, cancelled=None):
-        """Read just the native pages covering one 50-result software page."""
+        """Read the native 30-result pages covering one software page."""
         keyword = keyword.strip()[:160]
         if not keyword or not isinstance(page, int) or page < 1:
             raise StoreError('请输入关键词和有效页码。')

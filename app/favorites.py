@@ -4,9 +4,10 @@ from __future__ import annotations
 from i18n import text as ui_text, message as ui_message
 import threading
 import time
+from collections import OrderedDict
 
-from PySide6.QtCore import QObject, Qt, QThread, QTimer, QUrl, Signal, Slot, QEvent
-from PySide6.QtGui import QDesktopServices, QPixmap
+from PySide6.QtCore import QObject, Qt, QThread, QTimer, QUrl, Signal, Slot, QEvent, QSize
+from PySide6.QtGui import QDesktopServices, QPixmap, QIcon
 from PySide6.QtWidgets import (QAbstractItemView, QFrame, QHBoxLayout, QHeaderView, QScrollArea, QSizePolicy, QSplitter, QVBoxLayout, QWidget)
 from localized_widgets import (QCheckBox, QComboBox, QDialog, QLabel, QLineEdit, QPushButton, QTableWidget, QTableWidgetItem, QTabWidget)
 
@@ -19,9 +20,33 @@ from app_theme import theme_manager
 from ui_components import IconButton, title_block, scroll_page, surface, ColumnSplitter
 from shell_ui import notify
 from shiboken6 import isValid
-from store_images import ImageGallery, ProductImage
+from store_images import ImageGallery, ProductImage, load_search_thumbnails
 from store_diagnostics import record_request_error
 from app_logging import (log_event, new_context, log_context, contextual, record_error, traced, safe_part)
+
+
+THUMBNAIL_COLUMN = 7
+
+
+class SearchTable(QTableWidget):
+    """Keep model names readable; scroll horizontally when columns cannot fit."""
+    def __init__(self, *args):
+        super().__init__(*args)
+        self.column_timer = QTimer(self)
+        self.column_timer.setSingleShot(True)
+        self.column_timer.timeout.connect(self.fit_model_column)
+        self.horizontalHeader().sectionResized.connect(
+            lambda column, *_: self.column_timer.start(0) if column != 2 else None)
+
+    def viewportEvent(self, event):
+        if event.type() == QEvent.Resize and hasattr(self, 'column_timer'):
+            self.column_timer.start(0)
+        return super().viewportEvent(event)
+
+    def fit_model_column(self):
+        scale = theme_manager().tokens.get('font_size', 13) / 13
+        other = sum(self.columnWidth(column) for column in range(self.columnCount()) if column != 2)
+        self.setColumnWidth(2, max(round(150 * scale), self.viewport().width() - other))
 
 
 class RequestWorker(QThread):
@@ -621,6 +646,7 @@ class FavoritesDialog(QDialog):
         self.search_page = 0
         self.search_keyword = ''
         self.search_selected = {}
+        self.thumbnail_cache = OrderedDict()
         self.price_choices = {}
         self.favorite_checked = set()
         self.galleries = []
@@ -685,7 +711,7 @@ class FavoritesDialog(QDialog):
         self.previous_page_button = QPushButton(ui_text('上一页'))
         self.previous_page_button.clicked.connect(lambda: self.load_search_page(self.search_page - 1))
         pagination.addWidget(self.previous_page_button)
-        self.page_label = plain_label(ui_text('尚未搜索 · 每页 50 个'), 'muted')
+        self.page_label = plain_label(ui_message('尚未搜索 · 每页 {0} 个', SEARCH_PAGE_SIZE), 'muted')
         self.page_label.setAlignment(Qt.AlignCenter)
         pagination.addWidget(self.page_label, 1)
         self.next_page_button = QPushButton(ui_text('下一页'))
@@ -813,17 +839,24 @@ class FavoritesDialog(QDialog):
         scale = theme_manager().tokens.get('font_size', 13) / 13
         for table in (self.search_table, self.favorite_table):
             table.ensurePolished()
-            table.verticalHeader().setDefaultSectionSize(max(round(36 * scale), table.fontMetrics().height() + 14))
-            for column, width in ((0, 46), (1, 95), (3, 100), (4, 105), (5, 175), (6, 85)):
+            row_height = max(round(36 * scale), table.fontMetrics().height() + 14)
+            if table is self.search_table:
+                edge = max(44, min(64, round(48 * scale)))
+                table.setIconSize(QSize(edge, edge))
+                table.setColumnWidth(THUMBNAIL_COLUMN, max(edge + 16, table.fontMetrics().horizontalAdvance(ui_text('图片')) + 16))
+                row_height = max(row_height, edge + 12)
+            table.verticalHeader().setDefaultSectionSize(row_height)
+            for column, width in ((0, 46), (1, 95), (3, 90), (4, 100), (5, 165), (6, 80)):
                 if column < table.columnCount():
                     title = table.horizontalHeaderItem(column).text()
                     table.setColumnWidth(column, max(round(width * scale), table.fontMetrics().horizontalAdvance(title) + 28))
+        self.search_table.column_timer.start(0)
 
     def make_table(self, commercial=False):
         labels = [ui_text('选择'), ui_text('C 编号'), ui_text('型号'), ui_text('厂商'), ui_text('封装')]
         if commercial:
-            labels += [ui_text('单价 / 梯度'), ui_text('库存')]
-        table = QTableWidget(0, len(labels))
+            labels += [ui_text('单价 / 梯度'), ui_text('库存'), ui_text('图片')]
+        table = (SearchTable if commercial else QTableWidget)(0, len(labels))
         table.setHorizontalHeaderLabels(labels)
         table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         table.setSelectionBehavior(QAbstractItemView.SelectRows)
@@ -838,8 +871,15 @@ class FavoritesDialog(QDialog):
         table.setColumnWidth(1, 95)
         table.setColumnWidth(3, 100)
         table.setColumnWidth(4, 115)
-        table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
+        table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Fixed if commercial else QHeaderView.Stretch)
         if commercial:
+            table.setObjectName('searchProducts')
+            table.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
+            table.setHorizontalScrollMode(QAbstractItemView.ScrollPerPixel)
+            table.horizontalHeader().setSectionResizeMode(THUMBNAIL_COLUMN, QHeaderView.Fixed)
+            # Stable data/price columns; visually place photos after checkboxes.
+            table.horizontalHeader().moveSection(THUMBNAIL_COLUMN, 1)
+            table.cellDoubleClicked.connect(lambda row, column: self.open_gallery() if column == THUMBNAIL_COLUMN else None)
             table.setColumnWidth(5, 210)
             table.setColumnWidth(6, 85)
         if self.international:
@@ -872,6 +912,7 @@ class FavoritesDialog(QDialog):
             self.search_hint.setText(ui_text('请输入 C 编号、型号或关键词。'))
             return
         self.jobs.cancel('search')
+        self.jobs.cancel('thumbnails')
         self.searching = False
         self.search_keyword = keyword
         self.category_combo.blockSignals(True)
@@ -914,6 +955,7 @@ class FavoritesDialog(QDialog):
                         self.search_loaded, self.search_failed)
 
     def search_loaded(self, result):
+        self.jobs.cancel('thumbnails')
         self.searching = False
         self.search_stop_button.setEnabled(False)
         self.search_page, self.search_total, self.search_pages = result['page'], result['total'], result['pages']
@@ -931,6 +973,7 @@ class FavoritesDialog(QDialog):
         for product in self.search_items:
             self.append_row(self.search_table, product)
         self.search_table.blockSignals(False)
+        self.start_thumbnails()
         self.search_hint.setText(ui_message('共 {0:,} 个搜索结果 · 本页 {1} 个元件。', self.search_total, len(self.search_items))
                                  if self.search_items else ui_text('没有找到匹配元件，请尝试其他型号或关键词。'))
         self.update_pagination()
@@ -944,7 +987,7 @@ class FavoritesDialog(QDialog):
         self.previous_page_button.setEnabled(not self.searching and self.search_page > 1)
         self.next_page_button.setEnabled(not self.searching and 0 < self.search_page < self.search_pages)
         self.page_label.setText(ui_message('第 {0} / {1} 页 · 每页 {2} 个', self.search_page, max(1, self.search_pages), SEARCH_PAGE_SIZE)
-                                if self.search_page else ui_text('尚未搜索 · 每页 50 个'))
+                                if self.search_page else ui_message('尚未搜索 · 每页 {0} 个', SEARCH_PAGE_SIZE))
 
     def search_failed(self, error):
         self.searching = False
@@ -977,7 +1020,53 @@ class FavoritesDialog(QDialog):
         table.item(row, 1).setData(Qt.UserRole, product)
         if table is self.search_table:
             self.append_commerce(row, product)
+            self.set_thumbnail(row, product)
         table.blockSignals(was_blocked)
+
+    def set_thumbnail(self, row, product):
+        urls = product.get('thumbnails') or product.get('images') or [product.get('image', '')]
+        if isinstance(urls, str):
+            urls = [urls]
+        url = next((value for value in urls if value), '')
+        cell = QTableWidgetItem('…' if url else '—')
+        cell.setTextAlignment(Qt.AlignCenter)
+        cell.setData(Qt.UserRole, url)
+        cell.setToolTip(ui_text('正在加载图片…') if url else ui_text('暂无商品图片'))
+        self.search_table.setItem(row, THUMBNAIL_COLUMN, cell)
+        if url in self.thumbnail_cache:
+            self.thumbnail_loaded(row, (url, self.thumbnail_cache[url]))
+
+    def start_thumbnails(self):
+        requests = {}
+        for row in range(self.search_table.rowCount()):
+            cell = self.search_table.item(row, THUMBNAIL_COLUMN)
+            url = cell.data(Qt.UserRole)
+            if url and cell.icon().isNull():
+                requests.setdefault(url, []).append(row)
+        if requests and not self.closing:
+            factory = self.factory
+            self.jobs.start('thumbnails', lambda stop, progress: load_search_thumbnails(requests, factory, stop, progress),
+                            lambda _: None, lambda _: None, self.thumbnail_loaded)
+
+    def thumbnail_loaded(self, row, result):
+        url, image = result
+        if row >= self.search_table.rowCount():
+            return
+        cell = self.search_table.item(row, THUMBNAIL_COLUMN)
+        if cell is None or cell.data(Qt.UserRole) != url:
+            return
+        cell.setText('—' if image.isNull() else '')
+        cell.setToolTip(ui_text('图片加载失败') if image.isNull() else ui_text('双击查看商品原图'))
+        if not image.isNull():
+            icon = QIcon()
+            pixmap = QPixmap.fromImage(image)
+            for mode in (QIcon.Normal, QIcon.Active, QIcon.Selected):
+                icon.addPixmap(pixmap, mode)
+            cell.setIcon(icon)
+            self.thumbnail_cache[url] = image
+            self.thumbnail_cache.move_to_end(url)
+            while len(self.thumbnail_cache) > 128:
+                self.thumbnail_cache.popitem(last=False)
 
     def append_commerce(self, row, product):
         stock = product.get('stock')
@@ -1319,6 +1408,9 @@ class FavoritesDialog(QDialog):
             self.table.item(row, column).setToolTip(product.get(key, ''))
         self.table.blockSignals(False)
         self.show_detail(selected)
+        if self.table is self.search_table and not self.search_table.item(row, THUMBNAIL_COLUMN).data(Qt.UserRole):
+            self.set_thumbnail(row, selected)
+            self.start_thumbnails()
         if self.pending_gallery_part == selected['part']:
             self.pending_gallery_part = ''
             self.open_gallery()

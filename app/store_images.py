@@ -1,9 +1,10 @@
 """Native storefront photo gallery with original pixels, thumbnails and zoom."""
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from i18n import text as ui_text, message as ui_message
-from PySide6.QtCore import Qt, QTimer, QSize, Signal
-from PySide6.QtGui import QIcon, QKeySequence, QPixmap, QShortcut
+from PySide6.QtCore import Qt, QTimer, QSize, Signal, QPoint
+from PySide6.QtGui import QIcon, QImage, QPainter, QKeySequence, QPixmap, QShortcut
 from PySide6.QtWidgets import (QGraphicsScene, QGraphicsView, QHBoxLayout, QListWidget, QListWidgetItem, QVBoxLayout, QSplitter)
 from localized_widgets import (QDialog, QLabel, QPushButton)
 
@@ -11,6 +12,42 @@ from errors import Cancelled
 from ui_components import title_block
 from store import StoreError, check_cancelled
 from app_logging import traced, log_event, record_error, safe_part
+
+
+def load_search_thumbnails(requests, client_factory, cancelled, progress):
+    """Load distinct public URLs with bounded concurrency; never touch widgets."""
+    def fetch(url, rows):
+        check_cancelled(cancelled)
+        image = QImage()
+        try:
+            payload = client_factory().image(url, cancelled)
+            check_cancelled(cancelled)
+            image.loadFromData(payload)
+        except Cancelled:
+            raise
+        except Exception:
+            pass  # One unavailable photo must not block the rest of the page.
+        if not image.isNull():
+            image = image.scaled(128, 128, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            square = QImage(128, 128, QImage.Format_ARGB32_Premultiplied)
+            square.fill(Qt.white)
+            painter = QPainter(square)
+            painter.drawImage(QPoint((128 - image.width()) // 2, (128 - image.height()) // 2), image)
+            painter.end()
+            image = square
+        return url, rows, image
+
+    with ThreadPoolExecutor(max_workers=3, thread_name_prefix='store-thumbnail') as pool:
+        futures = [pool.submit(fetch, url, rows) for url, rows in requests.items()]
+        try:
+            for future in as_completed(futures):
+                check_cancelled(cancelled)
+                url, rows, image = future.result()
+                for row in rows:
+                    progress(row, (url, image))
+        finally:
+            for future in futures:
+                future.cancel()
 
 
 class ProductImage(QLabel):
