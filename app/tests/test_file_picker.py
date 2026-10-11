@@ -84,7 +84,10 @@ class FilePickerTests(unittest.TestCase):
                     # icons existed but their content rect was eaten by borders.
                     ink = sum(max(abs(int(color[i:i + 2], 16) - int(expected[i:i + 2], 16))
                                   for i in (1, 3, 5)) < 30 for color in pixels)
-                    self.assertGreater(ink, 15, button.objectName())
+                    # Compare logical area across display scales. At 100%,
+                    # the thin parent arrow has only 14 full-color pixels;
+                    # antialiased edge pixels do not pass the color cutoff.
+                    self.assertGreater(ink / ratio ** 2, 8, button.objectName())
                     self.assertLess(ink, len(pixels) // 2, button.objectName())
                     fingerprints.add(tuple(pixels))
                 self.assertEqual(len(fingerprints), 5)

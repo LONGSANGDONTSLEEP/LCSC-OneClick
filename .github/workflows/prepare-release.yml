@@ -64,12 +64,14 @@ jobs:
       - name: Prepare draft release and upload verified assets
         shell: pwsh
         run: |
+          python scripts/prepare_release_notes.py --tag $env:RELEASE_TAG --source ("docs/releases/" + $env:RELEASE_TAG + '.md') --output work/release-notes.md
+          if ($LASTEXITCODE -ne 0) { throw 'Release notes preparation failed' }
           $draft = gh release view $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --json isDraft --jq .isDraft 2>$null
           if ($LASTEXITCODE -eq 0) {
             if ($draft -ne 'true') { throw 'An existing public release will not be replaced' }
-            gh release edit $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --notes-file ("docs/releases/" + $env:RELEASE_TAG + '.md')
+            gh release edit $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --notes-file work/release-notes.md
           } else {
-            gh release create $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --draft --target $env:GITHUB_SHA --title ("LCSC3D " + $env:RELEASE_TAG.TrimStart('v')) --notes-file ("docs/releases/" + $env:RELEASE_TAG + '.md')
+            gh release create $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --draft --target $env:GITHUB_SHA --title ("LCSC3D " + $env:RELEASE_TAG.TrimStart('v')) --notes-file work/release-notes.md
           }
           if ($LASTEXITCODE -ne 0) { throw 'Draft release preparation failed' }
           gh release upload $env:RELEASE_TAG outputs/LCSC3D.exe outputs/LCSC3D.zip outputs/SHA256SUMS.txt --repo $env:GITHUB_REPOSITORY --clobber
