@@ -1,9 +1,9 @@
 """Single-window pages, anchored choices and in-app notifications."""
 from PySide6 import QtWidgets as W
-from PySide6.QtCore import Qt, QEvent, QPoint, QTimer, QObject, Signal, QPropertyAnimation, QEasingCurve
+from PySide6.QtCore import Qt, QEvent, QPoint, QSize, QTimer, QObject, Signal, QPropertyAnimation, QEasingCurve
 from PySide6.QtGui import QAction, QColor
 from shiboken6 import isValid
-from i18n import render, text as ui_text
+from i18n import render, text as ui_text, register
 
 
 def page_host(widget):
@@ -504,16 +504,164 @@ def choose_color(parent, color, title, callback):
 class FilePage(PageMixin, W.QFileDialog):
     def __init__(self, parent, title, path, filter, directory):
         super().__init__(parent, render(title), path, render(filter))
+        self._title = title
+        self.setObjectName('filePicker')
         self.setOption(W.QFileDialog.DontUseNativeDialog)
         self.setFileMode(W.QFileDialog.Directory if directory else W.QFileDialog.ExistingFile)
         self.setOption(W.QFileDialog.ShowDirsOnly, directory)
         self.setOption(W.QFileDialog.ReadOnly)
+        self.setSizeGripEnabled(False)
         self.initialize_page(parent)
+        self.setup_material_layout()
         self.dropdowns = [ComboDropdown(combo, intercept=True) for combo in self.findChildren(W.QComboBox)]
         for view in self.findChildren(W.QAbstractItemView):
             view.setContextMenuPolicy(Qt.NoContextMenu)
         for edit in self.findChildren(W.QLineEdit):
             edit.setCompleter(None)
+        from app_theme import theme_manager
+        theme_manager().changed.connect(self.refresh_toolbar)
+        register(self)
+        self.retranslate()
+        self.refresh_toolbar()
+
+    def setup_material_layout(self):
+        from ui_components import surface
+        # Keep Qt's views, models, buttons and their native navigation signals.
+        # Only rehouse them in the same Material surfaces as the other pages.
+        self.toolbar_buttons = {name: self.findChild(W.QToolButton, name) for name in
+                                ('backButton', 'forwardButton', 'toParentButton', 'listModeButton', 'detailModeButton')}
+        self.findChild(W.QToolButton, 'newFolderButton').hide()  # This picker is read-only.
+        for button in self.toolbar_buttons.values():
+            button.setToolButtonStyle(Qt.ToolButtonIconOnly)
+            button.setCursor(Qt.PointingHandCursor)
+        for name in ('listModeButton', 'detailModeButton'):
+            self.toolbar_buttons[name].setCheckable(True)
+            self.toolbar_buttons[name].clicked.connect(self.update_view_buttons)
+
+        grid = self.layout()
+        toolbar_layout = self.findChild(W.QHBoxLayout, 'hboxLayout')
+        for index in range(grid.count()):
+            if grid.itemAt(index).layout() is toolbar_layout:
+                toolbar_item = grid.takeAt(index)
+                toolbar_layout = toolbar_item.layout()
+                toolbar_layout.setParent(None)
+                break
+        look_in = self.findChild(W.QLabel, 'lookInLabel')
+        grid.removeWidget(look_in)
+        toolbar, toolbar_box = surface()
+        toolbar.setObjectName('fileToolbar')
+        toolbar_box.setContentsMargins(14, 10, 14, 10)
+        toolbar_layout.insertWidget(0, look_in)
+        toolbar_layout.setSpacing(8)
+        toolbar_box.addLayout(toolbar_layout)
+
+        self.locations_panel, locations_layout = surface()
+        self.locations_panel.setObjectName('fileLocations')
+        locations_layout.setContentsMargins(12, 14, 12, 12)
+        self.locations_title = W.QLabel()
+        self.locations_title.setObjectName('section')
+        locations_layout.addWidget(self.locations_title)
+        self.file_splitter = self.findChild(W.QSplitter, 'splitter')
+        sidebar = self.file_splitter.replaceWidget(0, self.locations_panel)
+        locations_layout.addWidget(sidebar, 1)
+        self.locations_panel.setMinimumWidth(170)
+        self.file_splitter.setChildrenCollapsible(False)
+        self.file_splitter.setHandleWidth(22)
+        self.file_splitter.setStretchFactor(0, 0)
+        self.file_splitter.setStretchFactor(1, 1)
+        self.file_splitter.setSizes([210, 800])
+        self.listing_panel = self.file_splitter.widget(1)
+        self.listing_panel.setObjectName('fileListing')
+        self.listing_panel.layout().setContentsMargins(14, 14, 14, 12)
+        self.listing_panel.layout().setSpacing(12)
+        self.listing_title = W.QLabel()
+        self.listing_title.setObjectName('section')
+        self.listing_panel.layout().insertWidget(0, self.listing_title)
+        tree = self.findChild(W.QTreeView, 'treeView')
+        tree.header().setSectionResizeMode(0, W.QHeaderView.Stretch)
+        tree.header().setResizeContentsPrecision(100)
+        for column in (1, 2, 3):
+            tree.header().setSectionResizeMode(column, W.QHeaderView.ResizeToContents)
+
+        footer, footer_box = surface()
+        footer.setObjectName('fileSelection')
+        footer_box.setContentsMargins(14, 12, 14, 12)
+        fields = W.QGridLayout()
+        fields.setHorizontalSpacing(12)
+        fields.setVerticalSpacing(10)
+        for name, kind, row, column, row_span in (
+                ('fileNameLabel', W.QLabel, 0, 0, 1), ('fileNameEdit', W.QLineEdit, 0, 1, 1),
+                ('fileTypeLabel', W.QLabel, 1, 0, 1), ('fileTypeCombo', W.QComboBox, 1, 1, 1),
+                ('buttonBox', W.QDialogButtonBox, 0, 2, 2)):
+            widget = self.findChild(kind, name)
+            grid.removeWidget(widget)
+            fields.addWidget(widget, row, column, row_span, 1)
+        fields.setColumnStretch(1, 1)
+        if self.fileMode() == W.QFileDialog.Directory:
+            self.findChild(W.QLabel, 'fileTypeLabel').hide()
+            self.findChild(W.QComboBox, 'fileTypeCombo').hide()
+        footer_box.addLayout(fields)
+        grid.removeWidget(self.file_splitter)
+        for row in range(grid.rowCount()):
+            grid.setRowStretch(row, 0)
+        for column in range(grid.columnCount()):
+            grid.setColumnStretch(column, 0)
+        grid.setContentsMargins(20, 18, 20, 18)
+        grid.setSpacing(14)
+        grid.addWidget(toolbar, 0, 0)
+        grid.addWidget(self.file_splitter, 1, 0)
+        grid.addWidget(footer, 2, 0)
+        grid.setRowStretch(1, 1)
+        grid.setColumnStretch(0, 1)
+
+    def retranslate(self):
+        self.setWindowTitle(render(self._title))
+        self.setLabelText(W.QFileDialog.LookIn, render(ui_text('当前位置')))
+        self.setLabelText(W.QFileDialog.FileName, render(ui_text('目录') if self.fileMode() == W.QFileDialog.Directory else ui_text('文件名')))
+        self.setLabelText(W.QFileDialog.FileType, render(ui_text('文件类型')))
+        self.setLabelText(W.QFileDialog.Accept, render(ui_text('选择')))
+        self.setLabelText(W.QFileDialog.Reject, render(ui_text('取消')))
+        self.locations_title.setText(render(ui_text('常用位置')))
+        self.listing_title.setText(render(ui_text('文件夹') if self.fileMode() == W.QFileDialog.Directory else ui_text('文件与文件夹')))
+        for name, title in (('backButton', ui_text('后退')), ('forwardButton', ui_text('前进')),
+                            ('toParentButton', ui_text('上一级目录')), ('listModeButton', ui_text('列表视图')),
+                            ('detailModeButton', ui_text('详细信息视图'))):
+            self.toolbar_buttons[name].setToolTip(render(title))
+            self.toolbar_buttons[name].setAccessibleName(render(title))
+
+    def refresh_toolbar(self):
+        from app_theme import theme_manager
+        from ui_components import icon
+        from PySide6.QtGui import QIcon
+        tokens = theme_manager().tokens
+        size = max(20, round(tokens.get('font_size', 13) * 1.5))
+        for name, symbol in (('backButton', 'back'), ('forwardButton', 'forward'),
+                             ('toParentButton', 'parent-folder'), ('listModeButton', 'list-view'),
+                             ('detailModeButton', 'detail-view')):
+            button = self.toolbar_buttons[name]
+            image = icon(symbol, tokens['accent_ink'], size)
+            disabled = icon(symbol, tokens['disabled'], size)
+            image.addPixmap(disabled.pixmap(size * 2, size * 2), QIcon.Disabled)
+            button.setIcon(image)
+            button.setIconSize(QSize(size, size))
+            # Qt's stock file-dialog buttons have a narrow fixed size. Material's
+            # default 12px side borders used to consume their entire icon area.
+            button.setFixedSize(size + 18, size + 18)
+        self.update_view_buttons()
+
+    def update_view_buttons(self):
+        self.toolbar_buttons['listModeButton'].setChecked(self.viewMode() == W.QFileDialog.List)
+        self.toolbar_buttons['detailModeButton'].setChecked(self.viewMode() == W.QFileDialog.Detail)
+
+    def changeEvent(self, event):
+        super().changeEvent(event)
+        if event.type() == QEvent.LanguageChange and hasattr(self, 'toolbar_buttons'):
+            self.retranslate()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        # QFileDialog initializes its native captions again on first display.
+        self.retranslate()
 
     def accept(self):
         from pathlib import Path

@@ -4,7 +4,7 @@ from pathlib import Path
 import sys
 import time
 
-from PySide6.QtCore import Qt, QTimer, QPoint
+from PySide6.QtCore import Qt, QTimer, QPoint, QUrl
 from PySide6.QtWidgets import QApplication
 from app_settings import Preferences
 from app_theme import theme_manager
@@ -13,7 +13,7 @@ from favorites import LoginDialog
 from library_preview import build_library_preview
 from settings_ui import SettingsDialog
 from ui_components import HelpDialog
-from shell_ui import notify
+from shell_ui import notify, choose_path
 
 
 def start(window, folder):
@@ -121,9 +121,57 @@ def start(window, folder):
             capture(window, 'sponsorship')
             settings.sponsorship_dialog.reject()
             settings.reject()
+            picker_root = destination / 'picker-files'
+            for name in ('Models', 'Symbols', 'Footprints'):
+                (picker_root / name).mkdir(parents=True, exist_ok=True)
+            window.path_input.setText(str(picker_root))
             window.choose_folder()
-            capture(window, 'folder-picker')
-            window.folder_page.reject()
+            picker = window.folder_page
+            picker.setSidebarUrls([QUrl.fromLocalFile(str(picker_root)),
+                                   QUrl.fromLocalFile(str(picker_root / 'Models'))])
+            for mode, language, size, name in (('light', 'zh_CN', 13, 'folder-picker'),
+                                               ('dark', 'zh_CN', 13, 'folder-picker-dark'),
+                                               ('light', 'en_US', 24, 'folder-picker-English-large')):
+                window.apply_preferences(Preferences(theme_mode=mode, language=language, font_size=size))
+                settle()
+                for button in picker.toolbar_buttons.values():
+                    frame = window._page_host.frames[picker]
+                    frame.ensureWidgetVisible(button)
+                    settle()
+                    pixels = button.grab().toImage()
+                    expected = theme_manager().tokens['accent_ink' if button.isEnabled() else 'disabled']
+                    half = round(button.iconSize().width() * pixels.devicePixelRatio() / 2)
+                    cx, cy = pixels.width() // 2, pixels.height() // 2
+                    ink = sum(max(abs(int(pixels.pixelColor(x, y).name()[i:i + 2], 16) - int(expected[i:i + 2], 16))
+                                  for i in (1, 3, 5)) < 30
+                              for y in range(cy - half, cy + half) for x in range(cx - half, cx + half))
+                    assert ink > 15, 'Missing file toolbar icon: ' + button.objectName()
+                assert picker.locations_panel.geometry().right() < picker.listing_panel.geometry().left()
+                capture(window, name)
+            picker.toolbar_buttons['toParentButton'].click()
+            assert Path(picker.directory().absolutePath()).resolve() == picker_root.parent.resolve()
+            picker.toolbar_buttons['backButton'].click()
+            assert Path(picker.directory().absolutePath()).resolve() == picker_root.resolve()
+            picker.toolbar_buttons['listModeButton'].click()
+            assert picker.viewMode() == picker.ViewMode.List
+            picker.toolbar_buttons['detailModeButton'].click()
+            assert picker.viewMode() == picker.ViewMode.Detail
+            picker.selectFile(str(picker_root / 'Models'))
+            picker.accept()
+            assert Path(window.path_input.text()).resolve() == (picker_root / 'Models').resolve()
+            report['file_picker_icons_visible'] = report['file_picker_material_panels'] = True
+            report['file_picker_navigation_and_selection'] = True
+            window.apply_preferences(Preferences(theme_mode='light'))
+            library = picker_root / 'Symbols' / 'Example.SchLib'
+            library.write_bytes(b'File picker fixture; not an exported library.')
+            selected = []
+            picker = choose_path(window, 'SchLib', str(library.parent), selected.append, filter='AD (*.SchLib)')
+            picker.setSidebarUrls([QUrl.fromLocalFile(str(picker_root))])
+            picker.selectFile(str(library))
+            capture(window, 'library-picker')
+            picker.accept()
+            assert [Path(value).resolve() for value in selected] == [library.resolve()]
+            report['file_picker_library_filter_and_selection'] = True
             login = LoginDialog(window)
             login.show()  # Do not call begin(): no QR or account requests.
             for index, name in enumerate(('qr', 'password', 'sms')):

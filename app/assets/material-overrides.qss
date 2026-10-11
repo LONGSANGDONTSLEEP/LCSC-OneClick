@@ -82,3 +82,22 @@ QFrame#notification { background:%(surface)s; border:1px solid %(border)s; borde
 QFrame#notification[severity="success"] { border-left-color:%(success)s; }
 QFrame#notification[severity="warning"] { border-left-color:%(warning)s; }
 QFrame#notification[severity="error"] { border-left-color:%(error)s; }
+
+/* Qt's file chooser keeps its native model/navigation inside Material cards. */
+QFileDialog#filePicker QFrame#fileToolbar, QFileDialog#filePicker QFrame#fileListing,
+QFileDialog#filePicker QFrame#fileSelection { background:%(surface)s; border:1px solid %(border)s; border-radius:10px; }
+QFileDialog#filePicker QFrame#fileLocations { background:%(field)s; border:1px solid %(border)s; border-radius:10px; }
+QFileDialog#filePicker QToolButton { background:%(surface)s; color:%(accent_ink)s; border:1px solid %(border)s; border-radius:6px; padding:0; margin:0; }
+QFileDialog#filePicker QToolButton:hover, QFileDialog#filePicker QToolButton:checked { background:%(hover)s; border:1px solid %(accent_ink)s; }
+QFileDialog#filePicker QToolButton:pressed { background:%(border)s; border:1px solid %(accent_ink)s; }
+QFileDialog#filePicker QToolButton:disabled { background:%(field)s; color:%(disabled)s; border:1px solid %(border)s; }
+QFileDialog#filePicker QToolButton:focus { border:2px solid %(accent_ink)s; }
+QFileDialog#filePicker QSplitter#splitter::handle:horizontal { image:none; background:%(border)s; margin:10px 10px; border:0; border-radius:1px; }
+QFileDialog#filePicker QListView#sidebar, QFileDialog#filePicker QListView#listView,
+QFileDialog#filePicker QTreeView#treeView { background:transparent; color:%(text)s; border:0; padding:0; outline:0; }
+QFileDialog#filePicker QListView#sidebar::item { padding:8px 6px; border:1px solid transparent; border-radius:6px; }
+QFileDialog#filePicker QListView#sidebar::item:hover { background:%(hover)s; }
+QFileDialog#filePicker QListView#sidebar::item:selected { color:%(accent_ink)s; background:%(hover)s; border:1px solid %(accent_ink)s; }
+QFileDialog#filePicker QListView#listView::item, QFileDialog#filePicker QTreeView#treeView::item { padding:5px 4px; border:0; }
+QFileDialog#filePicker QListView#listView::item:hover, QFileDialog#filePicker QTreeView#treeView::item:hover { background:%(hover)s; }
+QFileDialog#filePicker QListView#listView::item:selected, QFileDialog#filePicker QTreeView#treeView::item:selected { background:%(accent)s; color:%(on_accent)s; }

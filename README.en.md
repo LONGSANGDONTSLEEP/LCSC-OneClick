@@ -34,6 +34,7 @@ Screenshots show the actual application, using 2.2.1 except for the updated Appe
 | **Project output folders and names** | With only a PCB project selected, configure separate 3D, SchLib and PcbLib folders and both library names. Blank values use defaults; existing libraries are appended. |
 | **Separate part folder** | Choose a folder for individual exports. When blank, it defaults to the PCB project folder, or the existing library folder if no project is selected. |
 | **Direct project import** | Click **Import specified libraries into PCB project** below the target files in Append settings. Requires both a library and a project; no downloads are needed. |
+| **File picker improvements** | Toolbar icons remain visible across themes and font sizes. Separate Material cards and a draggable divider distinguish places from the file list. |
 
 Library merging, appending, PCB project integration, reuse of identical footprints and separate part exports remain available. Earlier changes are listed in the [version history (Chinese)](docs/版本历史.md).
 
@@ -294,7 +295,7 @@ Each stable release provides:
 - **AD export limits:** Unsupported geometry is reported as an export failure. IntLib generation and automatic embedding/binding of 3D models in PcbLib are not currently supported.
 - **Design checks:** Preview and export aid part selection and inspection. Verify pins, dimensions and footprints against the part's datasheet before using them in production designs.
 
-Version **2.2.2 passed 452 local regression tests**, including custom project destinations and names, separate part folders, direct library imports and settings migration. The actual EXE export self-test covers **17 complete UI flows**, alongside Material UI and settings/diagnostics checks. See the [2.2.2 verification record (Chinese)](docs/2.2.2验证记录.md).
+Version **2.2.2 passed 456 local regression tests**, including custom project destinations and names, separate part folders, direct library imports, settings migration, and file-picker icons and navigation. The actual EXE export self-test covers **17 complete UI flows**, alongside Material UI and settings/diagnostics checks. See the [2.2.2 verification record (Chinese)](docs/2.2.2验证记录.md).
 
 Existing checks also cover **136 original export-mode combinations**, **16 shared-footprint combinations** and **27 official AD comparison samples**. Earlier public online checks, screenshots and AD evidence remain in the [2.2.1 verification record (Chinese)](docs/验证记录.md).
 

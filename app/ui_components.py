@@ -54,6 +54,11 @@ ICON_PATHS = {
     'search': '<circle cx="10" cy="10" r="6"/><path d="m15 15 6 6"/>',
     'refresh': '<path d="M20 7V2m0 5h-5M4 17v5m0-5h5M20 7a9 9 0 0 0-16 2M4 17a9 9 0 0 0 16-2"/>',
     'cube': '<path d="m12 2 9 5v10l-9 5-9-5V7l9-5Zm0 10v10M3 7l9 5 9-5M8 4l9 5"/>',
+    'back': '<path d="m11 5-7 7 7 7M4 12h16"/>',
+    'forward': '<path d="m13 5 7 7-7 7M4 12h16"/>',
+    'parent-folder': '<path d="M12 20V4m-7 7 7-7 7 7"/>',
+    'list-view': '<rect x="3" y="4" width="5" height="5" rx="1"/><rect x="3" y="15" width="5" height="5" rx="1"/><path d="M12 6.5h9M12 17.5h9"/>',
+    'detail-view': '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M3 14h18M14 9v11"/>',
 }
 
 

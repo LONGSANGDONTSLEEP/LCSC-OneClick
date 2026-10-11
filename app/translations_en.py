@@ -1,6 +1,18 @@
 """English UI catalog. Keys remain the Simplified Chinese source messages."""
 
 ENGLISH = {
+    '当前位置': 'Location',
+    '目录': 'Folder',
+    '文件名': 'File name',
+    '文件类型': 'File type',
+    '常用位置': 'Places',
+    '文件夹': 'Folders',
+    '文件与文件夹': 'Files and folders',
+    '后退': 'Back',
+    '前进': 'Forward',
+    '上一级目录': 'Parent folder',
+    '列表视图': 'List view',
+    '详细信息视图': 'Details view',
     '已有库可只选 SchLib 或 PcbLib，只追加对应格式。\n只指定 PCB 工程时，可分别设置 3D、SchLib 和 PcbLib 的导出目录及库名；同名库存在时继续追加。\n相同封装自动复用，同名不同封装加序号；可在设置的“备份”页管理自动备份和恢复。': 'Select either or both existing libraries to append to.\nWith only a PCB project, choose separate 3D, SchLib and PcbLib folders and library names. Existing libraries are appended.\nIdentical footprints are reused; different footprints with the same name receive a suffix. Manage backups in Settings → Backups.',
     '将指定库导入到PCB工程': 'Import specified libraries into PCB project',
     '将上方指定lib导入到指定的PCB工程中。': 'Import the libraries specified above into the specified PCB project.',
