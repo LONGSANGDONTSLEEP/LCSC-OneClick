@@ -12,7 +12,10 @@ try:
         from updater import apply_update
         code = apply_update(sys.argv[2])
     else:
-        from main import main
+        if any(arg.startswith('--self-test') or arg == '--capture-docs' for arg in sys.argv[1:]):
+            from main import main
+        else:
+            from oneclick import main
         code = main()
 except Exception as exc:
     record_request_error(exc, '启动应用', level='CRITICAL')

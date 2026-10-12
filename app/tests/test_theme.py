@@ -157,7 +157,7 @@ class AppearanceTests(unittest.TestCase):
     def test_font_change_updates_existing_widgets_even_when_colors_are_unchanged(self):
         manager = theme_manager()
         first = effective_font_family(DEFAULT_FONT_FAMILY)
-        second = next(f for f in QFontDatabase.families() if f != first and not f.startswith('@'))
+        second = next(f for f in QFontDatabase.families() if f.strip() and f != first and not f.startswith('@'))
         button = QPushButton('Download')
         label = QLabel('LCSC3D Aa 123')
         manager.apply(Preferences(font_family=first))
