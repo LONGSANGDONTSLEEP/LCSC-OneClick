@@ -6,6 +6,7 @@ import tempfile
 import unittest
 import zlib
 import olefile
+from unittest.mock import patch
 from oneclick_export import export_bundle
 from model_binding import placement, finite, read_streams, embed_ad, Placement
 from test_oneclick import FixtureApi
@@ -43,7 +44,8 @@ def body_parameters(data):
     return found
 
 class ModelBindingTests(unittest.TestCase):
-    def test_embedded_step_guid_placement_and_kicad_reference(self):
+    @patch('model_binding.align_placement', side_effect=lambda data, p, step: (p, {'target_center_mm': [p.x, p.y]}))
+    def test_embedded_step_guid_placement_and_kicad_reference(self, _alignment):
         with tempfile.TemporaryDirectory() as directory:
             results, root, archive, failed = export_bundle(['C2040', 'C20197'], directory, api=ModelApi())
             streams = read_streams(root / 'OneClick.PcbLib')

@@ -3,17 +3,19 @@
 from pathlib import Path
 import sys
 from PySide6.QtCore import QLibraryInfo
-from PyInstaller.utils.hooks import collect_data_files
+from PyInstaller.utils.hooks import collect_data_files, collect_delvewheel_libs_directory
 
 root = Path(SPECPATH)
+cascade_datas, cascade_binaries = collect_delvewheel_libs_directory('cascadio')
 
 a = Analysis(
     [str(root / 'launcher.py')],
     pathex=[str(root)],
-    binaries=[],
+    binaries=cascade_binaries,
     datas=[(str(root / 'viewer.html'), '.'), (str(root / 'vector_viewer.html'), '.'),
            (str(Path(QLibraryInfo.path(QLibraryInfo.TranslationsPath)) / 'qtbase_zh_CN.qm'), 'assets'),
            (str(root / 'assets'), 'assets'), (str(root / 'licenses'), 'licenses')]
+          + cascade_datas
           + collect_data_files('qt_material', includes=['*.template', 'themes/*.xml', 'resources/source/*.svg'])
           + [(str(root.parent / 'docs/images/sponsorship' / filename), 'docs/images/sponsorship')
              for filename in ('alipay.png', 'wechat.png')],
@@ -21,7 +23,7 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=['tkinter', 'matplotlib', 'numpy', 'pandas', 'PyQt5', 'PyQt6',
+    excludes=['tkinter', 'matplotlib', 'pandas', 'trimesh', 'PyQt5', 'PyQt6',
               'PySide6.QtQml', 'PySide6.QtQuick', 'PySide6.QtQuickWidgets',
               'PySide6.QtOpenGL'],
     noarchive=False,

@@ -25,3 +25,9 @@
 AD 风格采用原生参考的字体与颜色，但按用户后续选择保留器件原字号，不统一为样本的 10pt。字号回归独立对照源数据与 SchLib 字体表，覆盖名称、编号、普通文字及多单元；原有整数点数舍入规则不变。
 
 来源：`https://easyeda.com/api/products/<C编号>/components`。模型和器件数据的版权及使用条件以官方库声明为准。
+# OneClick alignment regression
+
+`C225122-alignment.json.gz` and `C225122-alignment.step.gz` preserve official
+JLCEDA/EasyEDA data for the reported connector offset. They validate actual STEP
+geometry versus the source 3D projection. Component data rights remain with the
+original provider; these fixtures do not alter the STEP geometry.

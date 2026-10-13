@@ -1,5 +1,7 @@
 # 立创一键导出 · LCSC OneClick
 
+**1.2 修复模型偏移：** 解析 STEP 实际几何，按立创源 3D 投影校正 X/Y 中心与底面高度；新增“3D 偏移微调”，可按 C 编号保存额外的毫米偏移。C225122 的实际偏移已纳入离线回归测试。
+
 Windows 10/11 x64 便携工具：粘贴 C 编号 / 商城链接 / BOM，选择目标软件，一键导出 **原理图符号库、PCB 封装库和 STEP / OBJ 3D**，自动生成 ZIP。
 
 基于 [Travelerrrrrr/LCSC3D](https://github.com/Travelerrrrrr/LCSC3D) 2.3.0 的 AGPL 开源衍生版本，复用原项目的网络、模型和 EDA 转换引擎。原作者和贡献者拥有原代码版权。原版说明见 [README.upstream.md](README.upstream.md)。

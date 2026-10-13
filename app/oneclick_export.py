@@ -32,7 +32,7 @@ def read_bom(path):
             pass
     raise ValueError('文件编码无法识别，请另存为 UTF-8 CSV')
 
-def export_bundle(parts, destination, preset='AD + KiCad', cancelled=None, progress=None, api=None):
+def export_bundle(parts, destination, preset='AD + KiCad', cancelled=None, progress=None, api=None, corrections=None):
     if not parts:
         raise ValueError('没有有效的 C 编号')
     destination = Path(destination).expanduser().resolve()
@@ -46,7 +46,7 @@ def export_bundle(parts, destination, preset='AD + KiCad', cancelled=None, progr
     cancelled = cancelled or threading.Event()
     api = api or NetworkApi(cancelled)
     results = download_batch(parts, options, cancelled, progress, api=api)
-    bindings = integrate_models(results, root, api, cancelled)
+    bindings = integrate_models(results, root, api, cancelled, corrections)
     report = {'preset': preset, 'requested': parts, 'results': [asdict(r) for r in results],
               'cancelled': bool(cancelled and cancelled.is_set()),
               'missing_results': [p for p in parts if p not in {r.part for r in results}],

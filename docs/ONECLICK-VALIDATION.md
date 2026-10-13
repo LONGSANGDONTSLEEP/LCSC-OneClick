@@ -20,3 +20,11 @@
 - 1.1 便携 EXE 主界面冒烟与两个器件的在线导出均退出码 0。
 - AltiumSharp 1.0.2 独立读取源码和 EXE 导出的 PcbLib：2 个封装，各有一个原生 3D Body，均能读取完整内嵌 STEP，库解析零警告、零错误。见 [3D 整合说明](MODEL-BINDING.md)。
 - EXE 中 oneclick、oneclick_export、model_binding 代码对象与源码编译结果逐项相等。
+
+## 1.2 C225122 偏移修复
+
+- 全量回归 568 项通过（239.146 秒）。真实 C225122 STEP 验证 X/Y 范围与源投影的吻合，底面 Z=0；验证附加偏移及尺寸不匹配拒绝自动校准。
+- 源码及便携 EXE 在线导出 C2040、C20197、C225122 均成功；冻结 EXE GUI 和导出检查退出码 0。
+- AltiumSharp 独立读取 EXE 生成的库，3 个封装、3 个内嵌模型关联均正确，库解析零警告、零错误；C225122 读取值为 X=-123.032 mil、Y=12.382 mil、Z=0.394 mil（约 -3.1250 / +0.3145 / +0.0100 mm）。
+- EXE 中 oneclick、oneclick_export、model_binding、model_alignment 代码对象与当前源码逐项相等。
+- [计算顶视图对比](images/C225122-alignment.png) 显示修正后引脚与焊盘对齐；该图不是 Altium 软件截图。

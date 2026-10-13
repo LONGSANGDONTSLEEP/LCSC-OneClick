@@ -4,7 +4,7 @@ Native framing researched against AltiumSharp PcbLibWriter and KiCad's Altium
 reader. Original implementation, AGPL-3.0-or-later; see THIRD-PARTY.md.
 """
 from __future__ import annotations
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import hashlib
 import io
 import math
@@ -21,6 +21,7 @@ from compound_storage import compound_file
 from library_merge import footprint_signature
 from model3d import document, model_reference
 from kicad import q
+from model_alignment import align_placement
 
 @dataclass(frozen=True)
 class Placement:
@@ -71,7 +72,7 @@ def parameter_block(values):
 def mil(mm):
     return f'{mm / 0.0254:.8f}mil'
 
-def body_record(model_id, name, p):
+def body_record(model_id, name, p, outline_center=None):
     values = {
         'V7_LAYER': 'MECHANICAL1', 'NAME': '', 'KIND': 0, 'SUBPOLYINDEX': -1,
         'UNIONINDEX': 0, 'ARCRESOLUTION': '0.5mil', 'ISSHAPEBASED': 'FALSE',
@@ -86,9 +87,10 @@ def body_record(model_id, name, p):
         'MODEL.MODELTYPE': 1, 'MODEL.MODELSOURCE': 'Undefined',
     }
     w, h = p.width / 2, p.height / 2
-    angle = math.radians(p.rz)
-    vertices = [(p.x + x * math.cos(angle) - y * math.sin(angle),
-                 p.y + x * math.sin(angle) + y * math.cos(angle))
+    angle = 0 if outline_center else math.radians(p.rz)
+    cx, cy = outline_center or (p.x, p.y)
+    vertices = [(cx + x * math.cos(angle) - y * math.sin(angle),
+                 cy + x * math.sin(angle) + y * math.cos(angle))
                 for x, y in [(-w, -h), (w, -h), (w, h), (-w, h)]]
     body = _common(57) + bytes(5) + parameter_block(values) + struct.pack('<I', 4)
     body += b''.join(struct.pack('<dd', raw(x), raw(y)) for x, y in vertices)
@@ -131,7 +133,8 @@ def embed_ad(path, assignments):
                 'ROTX': '0.000', 'ROTY': '0.000', 'ROTZ': '0.000', 'DZ': 0, 'CHECKSUM': 0, 'NAME': name}))
             streams[f'Library/Models/{index}'] = zlib.compress(item['step'])
         model_id = models[key]
-        streams[section + '/Data'] += body_record(model_id, 'LCSC_' + key[:16] + '.step', item['placement'])
+        streams[section + '/Data'] += body_record(model_id, 'LCSC_' + key[:16] + '.step', item['placement'],
+            item.get('alignment', {}).get('target_center_mm'))
         count = struct.unpack('<I', streams[section + '/Header'])[0]
         streams[section + '/Header'] = struct.pack('<I', count + 1)
         for i in items:
@@ -172,7 +175,7 @@ def link_kicad(root, assignments):
         for i in items:
             i['kicad'] = {'footprint': path.relative_to(root).as_posix(), 'path': reference}
 
-def integrate_models(results, root, api, cancelled):
+def integrate_models(results, root, api, cancelled, corrections=None):
     assignments, report = [], []
     for result in results:
         if not set(result.completed_formats) & {'PCBLIB', 'KICAD_FOOTPRINT'}:
@@ -192,11 +195,21 @@ def integrate_models(results, root, api, cancelled):
             step = steps[0].read_bytes()
             if not step.lstrip().startswith(b'ISO-10303-21;') or b'END-ISO-10303-21;' not in step:
                 raise ValueError('STEP 数据不完整')
+            p, alignment = align_placement(data, p, step)
+            delta = (corrections or {}).get(result.part, [0, 0, 0])
+            if len(delta) != 3:
+                raise ValueError('手动校准必须包含 X/Y/Z 三个毫米偏移')
+            dx, dy, dz = (finite(v) for v in delta)
+            p = replace(p, x=p.x + dx, y=p.y + dy, z=p.z + dz)
+            alignment['manual_delta_mm'] = [dx, dy, dz]
+            alignment['target_center_mm'] = [alignment['target_center_mm'][0] + dx,
+                                              alignment['target_center_mm'][1] + dy]
+            alignment['corrected_translation_mm'] = [p.x, p.y, p.z]
             signature = None
             if 'PCBLIB' in result.completed_formats:
                 _, streams = _pcblib_component(data, result.part, lambda: None, merged=True)
                 signature = footprint_signature(streams)
-            assignments.append(dict(row, result=result, errors=row['errors'], placement=p,
+            assignments.append(dict(row, result=result, errors=row['errors'], placement=p, alignment=alignment,
                 step=step, step_path=steps[0], digest=hashlib.sha256(step).hexdigest(),
                 signature=signature))
         except Exception as exc:
@@ -219,7 +232,8 @@ def integrate_models(results, root, api, cancelled):
                     i['errors'].append('KiCad 3D 关联失败：' + str(exc))
     for item in assignments:
         row = next(r for r in report if r['part'] == item['part'])
-        row.update(ad=item.get('ad'), kicad=item.get('kicad'), placement=item['placement'].__dict__)
+        row.update(ad=item.get('ad'), kicad=item.get('kicad'), placement=item['placement'].__dict__,
+                   alignment=item['alignment'])
     for row in report:
         result = next(r for r in results if r.part == row['part'])
         if row['errors']:

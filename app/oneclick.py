@@ -6,23 +6,28 @@ from pathlib import Path
 from PySide6.QtCore import Qt, QThread, Signal, QUrl, QTimer
 from PySide6.QtGui import QDesktopServices, QFont
 from PySide6.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QPushButton, QPlainTextEdit, QLineEdit, QComboBox, QFileDialog, QProgressBar, QMessageBox)
+    QPushButton, QPlainTextEdit, QLineEdit, QComboBox, QFileDialog, QProgressBar, QMessageBox,
+    QDialog, QDialogButtonBox, QTableWidget, QTableWidgetItem, QDoubleSpinBox)
 from oneclick_export import PRESETS, extract_parts, read_bom, export_bundle
-from app_paths import configure_runtime_paths
+from app_paths import configure_runtime_paths, data_directory
+from backend import atomic_write
+import json
 from app_logging import configure_logging, install_exception_hooks
 
 class Worker(QThread):
     phase = Signal(int, str)
     done = Signal(object)
     error = Signal(str)
-    def __init__(self, parts, destination, preset):
+    def __init__(self, parts, destination, preset, corrections=None):
         super().__init__()
         self.parts, self.destination, self.preset = parts, destination, preset
         self.cancelled = threading.Event()
+        self.corrections = corrections
     def run(self):
         try:
             result = export_bundle(self.parts, self.destination, self.preset, self.cancelled,
-                lambda index, phase, title: self.phase.emit(index, phase + (' · ' + title if title else '')))
+                lambda index, phase, title: self.phase.emit(index, phase + (' · ' + title if title else '')),
+                corrections=self.corrections)
             self.done.emit(result)
         except Exception as exc:
             self.error.emit(str(exc))
@@ -34,7 +39,14 @@ class OneClickWindow(QWidget):
         self.last_root = None
         self.failed = []
         self.advanced = None
-        self.setWindowTitle('立创一键导出 · LCSC OneClick 1.1')
+        self.correction_path = data_directory() / 'OneClick-3d-corrections.json'
+        try:
+            self.corrections = json.loads(self.correction_path.read_text(encoding='utf-8'))
+            if not isinstance(self.corrections, dict):
+                self.corrections = {}
+        except (OSError, ValueError):
+            self.corrections = {}
+        self.setWindowTitle('立创一键导出 · LCSC OneClick 1.2')
         self.resize(920, 730)
         layout = QVBoxLayout(self)
         title = QLabel('立创元件，一键打包')
@@ -53,6 +65,9 @@ class OneClickWindow(QWidget):
         self.count = QLabel('0 个器件')
         row.addWidget(self.count)
         row.addStretch()
+        self.calibrate = QPushButton('3D 偏移微调')
+        self.calibrate.clicked.connect(self.edit_corrections)
+        row.addWidget(self.calibrate)
         advanced = QPushButton('高级：商城搜索 / 预览 / 自定义导出')
         advanced.clicked.connect(self.open_advanced)
         row.addWidget(advanced)
@@ -110,6 +125,50 @@ class OneClickWindow(QWidget):
         path = QFileDialog.getExistingDirectory(self, '选择保存目录', self.destination.text())
         if path:
             self.destination.setText(path)
+    def edit_corrections(self):
+        parts = extract_parts(self.input.toPlainText())
+        if not parts:
+            QMessageBox.information(self, '3D 微调', '先填入需要微调的 C 编号')
+            return
+        dialog = QDialog(self)
+        dialog.setWindowTitle('3D 偏移微调（叠加到自动对齐，单位 mm）')
+        dialog.resize(610, 360)
+        layout = QVBoxLayout(dialog)
+        layout.addWidget(QLabel('默认自动校正 STEP 原点；特殊器件可追加 X/Y/Z 偏移。\n正负方向按 EDA 坐标轴。填 0 恢复自动对齐；保存后重新导出生效。'))
+        table = QTableWidget(len(parts), 4)
+        table.setHorizontalHeaderLabels(['C 编号', 'ΔX (mm)', 'ΔY (mm)', 'ΔZ (mm)'])
+        table.horizontalHeader().setStretchLastSection(True)
+        layout.addWidget(table)
+        boxes = {}
+        for row, part in enumerate(parts):
+            item = QTableWidgetItem(part)
+            item.setFlags(item.flags() & ~Qt.ItemIsEditable)
+            table.setItem(row, 0, item)
+            values = self.corrections.get(part, [0, 0, 0])
+            boxes[part] = []
+            for column in range(3):
+                box = QDoubleSpinBox()
+                box.setRange(-1000, 1000)
+                box.setDecimals(4)
+                box.setSingleStep(.1)
+                try:
+                    box.setValue(float(values[column]))
+                except (TypeError, ValueError, IndexError):
+                    pass
+                table.setCellWidget(row, column + 1, box)
+                boxes[part].append(box)
+        buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+        if dialog.exec() == QDialog.Accepted:
+            updated = dict(self.corrections)
+            updated.update({part: [b.value() for b in group] for part, group in boxes.items()})
+            try:
+                atomic_write(self.correction_path, json.dumps(updated).encode('utf-8'))
+                self.corrections = updated
+            except OSError as exc:
+                QMessageBox.warning(self, '保存失败', str(exc))
     def start_export(self):
         parts = extract_parts(self.input.toPlainText())
         if not parts or not self.destination.text().strip():
@@ -118,10 +177,10 @@ class OneClickWindow(QWidget):
         self.log.clear()
         self.failed = []
         self.progress.setRange(0, 0)
-        for widget in (self.start, self.retry, self.input, self.preset, self.destination, self.bom, self.browse):
+        for widget in (self.start, self.retry, self.input, self.preset, self.destination, self.bom, self.browse, self.calibrate):
             widget.setEnabled(False)
         self.stop.setEnabled(True)
-        self.worker = Worker(parts, self.destination.text().strip(), self.preset.currentText())
+        self.worker = Worker(parts, self.destination.text().strip(), self.preset.currentText(), self.corrections)
         self.worker.phase.connect(lambda index, text: self.log.appendPlainText(f'{parts[index]} · {text}'))
         self.worker.done.connect(self.completed)
         self.worker.error.connect(lambda text: self.log.appendPlainText('导出失败：' + text))
@@ -134,7 +193,7 @@ class OneClickWindow(QWidget):
         self.log.appendPlainText(f'ZIP：{archive}\n未完成全部格式：{len(self.failed)} 个（详情见 results.csv）')
         self.open.setEnabled(True)
     def finished(self):
-        for widget in (self.start, self.input, self.preset, self.destination, self.bom, self.browse):
+        for widget in (self.start, self.input, self.preset, self.destination, self.bom, self.browse, self.calibrate):
             widget.setEnabled(True)
         self.stop.setEnabled(False)
         self.retry.setEnabled(bool(self.failed))
@@ -163,11 +222,11 @@ class OneClickWindow(QWidget):
 
 def main():
     configure_runtime_paths()
-    configure_logging('INFO', version='OneClick-1.1')
+    configure_logging('INFO', version='OneClick-1.2')
     install_exception_hooks()
     if '--smoke-export' in sys.argv:
         destination = Path(sys.argv[sys.argv.index('--smoke-export') + 1])
-        results, root, archive, failed = export_bundle(['C2040', 'C20197'], destination)
+        results, root, archive, failed = export_bundle(['C2040', 'C20197', 'C225122'], destination)
         return 1 if failed else 0
     QApplication.setAttribute(Qt.AA_ShareOpenGLContexts)
     app = QApplication(sys.argv)
