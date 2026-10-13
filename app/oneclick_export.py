@@ -9,7 +9,8 @@ import zipfile
 from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
-from backend import Options, download_batch
+from backend import Options, NetworkApi, download_batch
+from model_binding import integrate_models
 
 PRESETS = {
     'Altium Designer': ('SCHLIB', 'PCBLIB', 'STEP', 'OBJ'),
@@ -42,11 +43,15 @@ def export_bundle(parts, destination, preset='AD + KiCad', cancelled=None, progr
     options = Options(root, formats=PRESETS[preset], merge_schlib=True, merge_pcblib=True,
                       schlib_name='OneClick', pcblib_name='OneClick', kicad_merge=True,
                       kicad_library_name='OneClick')
-    results = download_batch(parts, options, cancelled or threading.Event(), progress, api=api)
+    cancelled = cancelled or threading.Event()
+    api = api or NetworkApi(cancelled)
+    results = download_batch(parts, options, cancelled, progress, api=api)
+    bindings = integrate_models(results, root, api, cancelled)
     report = {'preset': preset, 'requested': parts, 'results': [asdict(r) for r in results],
               'cancelled': bool(cancelled and cancelled.is_set()),
               'missing_results': [p for p in parts if p not in {r.part for r in results}],
-              'note': '导出元件库，不是整板 PCB 工程。3D 需在 EDA 中手动绑定和校准。'}
+              'model_bindings': bindings,
+              'note': 'AD 内嵌 STEP；KiCad 关联项目相对路径。放置参数来自源库，生产前须核对。'}
     (root / 'manifest.json').write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
     rows = io.StringIO(newline='')
     writer = csv.writer(rows)
@@ -54,13 +59,15 @@ def export_bundle(parts, destination, preset='AD + KiCad', cancelled=None, progr
     for r in results:
         writer.writerow([r.part, r.title, r.status, '/'.join(r.completed_formats), r.message])
     (root / 'results.csv').write_text(rows.getvalue(), encoding='utf-8-sig')
-    failed = [r.part for r in results if set(options.formats) - set(r.completed_formats)]
+    failed = [r.part for r in results if set(options.formats) - set(r.completed_formats) or r.export_errors]
     failed += report['missing_results']
     (root / 'retry.txt').write_text('\n'.join(failed), encoding='utf-8')
     (root / '使用说明.txt').write_text(
         'AD：打开 OneClick.SchLib / OneClick.PcbLib。\n'
         'KiCad：在库管理器添加 OneClick.kicad_sym 和 OneClick.pretty，库昵称均为 OneClick。\n'
-        'STEP/OBJ 在 OneClick_3D 目录；仅3D模式按器件分目录。模型需要手动绑定并核对旋转、位置和高度。\n'
+        'AD：STEP 已内嵌在 PcbLib，无需再手动绑定。没有官方 STEP 或放置数据不受支持的器件保留二维封装。\n'
+        'KiCad：复制 OneClick_3D 文件夹到你的 KiCad 工程根目录，封装中的 ${KIPRJMOD} 关联会自动找到模型。\n'
+        '模型的原点、旋转和高度来自源库；生产前需在 3D 视图核对。仅3D模式按器件分目录。\n'
         'results.csv 和 manifest.json 记录真实结果。retry.txt 可重新导入；没有官方3D的器件重试仍可能缺失。\n'
         '这是元件符号、PCB封装和3D资源包，不含整板工程。生产前按数据手册核对。\n', encoding='utf-8-sig')
     archive = root.with_suffix('.zip')

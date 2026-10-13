@@ -34,7 +34,7 @@ class OneClickWindow(QWidget):
         self.last_root = None
         self.failed = []
         self.advanced = None
-        self.setWindowTitle('立创一键导出 · LCSC OneClick 1.0')
+        self.setWindowTitle('立创一键导出 · LCSC OneClick 1.1')
         self.resize(920, 730)
         layout = QVBoxLayout(self)
         title = QLabel('立创元件，一键打包')
@@ -93,7 +93,7 @@ class OneClickWindow(QWidget):
         self.log = QPlainTextEdit()
         self.log.setReadOnly(True)
         layout.addWidget(self.log, 1)
-        note = QLabel('导出的是元件库，非整板工程。官方没有 3D 的器件会明确标注；模型需手动绑定、校准。\n每次导出创建独立目录，包含 ZIP、CSV 结果清单和可重新导入的 retry.txt。')
+        note = QLabel('AD 封装库自动内嵌 STEP；KiCad 自动关联模型（将 OneClick_3D 复制到工程根目录）。\n放置参数来自源库，请在 3D 视图核对。每次导出生成独立 ZIP、CSV 和重试列表。')
         note.setWordWrap(True)
         layout.addWidget(note)
     def import_bom(self):
@@ -163,7 +163,7 @@ class OneClickWindow(QWidget):
 
 def main():
     configure_runtime_paths()
-    configure_logging('INFO', version='OneClick-1.0')
+    configure_logging('INFO', version='OneClick-1.1')
     install_exception_hooks()
     if '--smoke-export' in sys.argv:
         destination = Path(sys.argv[sys.argv.index('--smoke-export') + 1])
